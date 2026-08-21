@@ -1,0 +1,196 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design tokens ported from stitch_quizguard_universal_exam_platform/academic_precision/DESIGN.md
+ * ("Academic Precision" system). Light values are 1:1 with the Stitch mockups; dark values are a
+ * derived approximation (the mockups are light-only) following DESIGN.md's dark mode guidance.
+ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  /* Success/warning status colors used by exam monitoring badges (Normal/Warning/Flagged) */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+
+  /* Radius scale ported from DESIGN.md `rounded` tokens (not derived from a single --radius) */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 1.5rem;
+  --radius-4xl: 1.5rem;
+}
+
+:root {
+  /* Core neutrals (Academic Precision: surface / on-surface) */
+  --background: #faf8ff;
+  --foreground: #131b2e;
+  --card: #ffffff;
+  --card-foreground: #131b2e;
+  --popover: #ffffff;
+  --popover-foreground: #131b2e;
+
+  /* Brand indigo */
+  --primary: #3525cd;
+  --primary-foreground: #ffffff;
+
+  /* Secondary / muted / accent surfaces */
+  --secondary: #e2e7ff;
+  --secondary-foreground: #131b2e;
+  --muted: #eaedff;
+  --muted-foreground: #464555;
+  --accent: #e2e7ff;
+  --accent-foreground: #131b2e;
+
+  /* Status */
+  --destructive: #ba1a1a;
+  --success: #059669;
+  --success-foreground: #ffffff;
+  --warning: #b45309;
+  --warning-foreground: #ffffff;
+
+  --border: #c7c4d8;
+  --input: #c7c4d8;
+  --ring: #3525cd;
+
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.5rem;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #131b2e;
+  --sidebar-primary: #3525cd;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eaedff;
+  --sidebar-accent-foreground: #131b2e;
+  --sidebar-border: #c7c4d8;
+  --sidebar-ring: #3525cd;
+}
+
+.dark {
+  --background: #0b0e1a;
+  --foreground: #e5e7fb;
+  --card: #131628;
+  --card-foreground: #e5e7fb;
+  --popover: #131628;
+  --popover-foreground: #e5e7fb;
+
+  --primary: #c3c0ff;
+  --primary-foreground: #14104a;
+
+  --secondary: #1c2033;
+  --secondary-foreground: #e5e7fb;
+  --muted: #1c2033;
+  --muted-foreground: #9b9ab3;
+  --accent: #232842;
+  --accent-foreground: #e5e7fb;
+
+  --destructive: #ff6b6b;
+  --success: #34d399;
+  --success-foreground: #052e1f;
+  --warning: #fbbf24;
+  --warning-foreground: #3a2604;
+
+  --border: #2a2f47;
+  --input: #2a2f47;
+  --ring: #c3c0ff;
+
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+
+  --sidebar: #131628;
+  --sidebar-foreground: #e5e7fb;
+  --sidebar-primary: #c3c0ff;
+  --sidebar-primary-foreground: #14104a;
+  --sidebar-accent: #1c2033;
+  --sidebar-accent-foreground: #e5e7fb;
+  --sidebar-border: #2a2f47;
+  --sidebar-ring: #c3c0ff;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* Proctoring-style "scanning" sweep — used behind the login card to evoke an active
+   monitoring session. Guarded by prefers-reduced-motion since it's purely decorative. */
+@keyframes scan-sweep {
+  0% {
+    transform: translateY(-20%);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(120%);
+    opacity: 0;
+  }
+}
+
+.animate-scan-sweep {
+  animation: scan-sweep 7s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-scan-sweep {
+    animation: none;
+  }
+}

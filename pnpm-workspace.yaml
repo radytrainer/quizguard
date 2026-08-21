@@ -1,0 +1,11 @@
+allowBuilds:
+  esbuild: true
+  sharp: false
+  unrs-resolver: false
+
+# Phase 11 security audit: both are transitive (drizzle-kit's outdated @esbuild-kit dep;
+# exceljs's uuid dep), not called directly by app code, but patched versions exist and pnpm can
+# force them without touching package.json's direct dependency versions.
+overrides:
+  esbuild: ">=0.25.0"
+  uuid: ">=11.1.1"

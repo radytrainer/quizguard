@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+.scaffold-tmp
+coverage
+*.md
+.env*
+!.env.example

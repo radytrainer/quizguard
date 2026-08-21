@@ -1,0 +1,122 @@
+name: quizguard-prod
+
+# The production stack (Phase 13, docs/ARCHITECTURE.md — Section 16) — everything the dev
+# docker-compose.yml deliberately doesn't run (the app itself, the realtime server, Nginx/TLS),
+# since dev runs those natively via `pnpm dev`/`pnpm realtime:dev` for fast HMR. Two separate
+# compose files rather than profiles on one: the two setups don't share service definitions
+# (dev's postgres/redis expose host ports for local tooling like Drizzle Studio; prod's don't).
+#
+# Before first boot: infrastructure/nginx/certs/generate-dev-cert.sh (or supply real certs —
+# see Section 16, "Real HTTPS certificates"), then `docker compose -f docker-compose.prod.yml
+# run --rm migrate` once before `up`.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quizguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quizguard_prod_password}
+      POSTGRES_DB: ${POSTGRES_DB:-quizguard}
+    volumes:
+      - quizguard_prod_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-quizguard} -d ${POSTGRES_DB:-quizguard}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - quizguard_prod_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile
+      target: migrator
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-quizguard}:${POSTGRES_PASSWORD:-quizguard_prod_password}@postgres:5432/${POSTGRES_DB:-quizguard}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # No `restart:` and not depended on by app/realtime — run explicitly with
+    # `docker compose -f docker-compose.prod.yml run --rm migrate`, never automatically.
+    profiles: ["tools"]
+
+  app:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile
+      # `migrator` (a one-off tool image, not meant to keep running) is declared after `runner`
+      # in the Dockerfile, so it's the default build target when none is named — explicit here
+      # to avoid silently building and running the wrong stage.
+      target: runner
+      args:
+        # Deliberately not set — see src/features/realtime/socket-client.ts and src/proxy.ts:
+        # the browser reaches the realtime server same-origin through Nginx, so no public
+        # domain needs to be baked into the client bundle at build time.
+        NEXT_PUBLIC_REALTIME_URL: ""
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-quizguard}:${POSTGRES_PASSWORD:-quizguard_prod_password}@postgres:5432/${POSTGRES_DB:-quizguard}
+      REDIS_URL: redis://redis:6379
+      APP_URL: ${APP_URL:-https://localhost}
+      REALTIME_PORT: 4001
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  realtime:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.realtime
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-quizguard}:${POSTGRES_PASSWORD:-quizguard_prod_password}@postgres:5432/${POSTGRES_DB:-quizguard}
+      REDIS_URL: redis://redis:6379
+      # Must match the app's own public origin — the realtime server's CORS check (Section 12)
+      # compares this against the browser's Origin header on every socket handshake.
+      APP_URL: ${APP_URL:-https://localhost}
+      REALTIME_PORT: 4001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+      - realtime
+
+volumes:
+  quizguard_prod_postgres_data:
+  quizguard_prod_redis_data:

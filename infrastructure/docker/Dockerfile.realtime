@@ -1,0 +1,28 @@
+# Production image for the standalone realtime server (src/realtime/server.ts, Phase 9) — a
+# separate process from the Next.js app for the reasons in docs/ARCHITECTURE.md — Section 12.
+# Runs via `tsx` directly rather than a separate compile step: this process is small, has no
+# build artifact worth isolating (unlike the Next app's own multi-stage Dockerfile), and it's
+# exactly how it already runs in dev (`pnpm realtime:dev`) — one fewer thing to keep in sync
+# between environments. `tsx` moved from devDependencies to dependencies (package.json) since
+# it's a genuine production runtime requirement for this image now, not just a dev tool.
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine AS base
+RUN corepack enable
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --prod --frozen-lockfile
+
+FROM base AS runner
+ENV NODE_ENV=production
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 realtime
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --chown=realtime:nodejs . .
+
+USER realtime
+EXPOSE 4001
+CMD ["npx", "tsx", "src/realtime/server.ts"]

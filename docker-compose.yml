@@ -1,0 +1,46 @@
+name: quizguard
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quizguard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quizguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quizguard_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-quizguard}
+    ports:
+      # 55432, not 5432: dev machines commonly run one or more native PostgreSQL services
+      # (this one had five, versions 14-18, occupying 5432-5436) and Docker Desktop's WSL2
+      # port-forwarding will silently route to one of those instead of this container.
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - quizguard_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-quizguard} -d ${POSTGRES_DB:-quizguard}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: quizguard-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - quizguard_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  quizguard_postgres_data:
+  quizguard_redis_data:

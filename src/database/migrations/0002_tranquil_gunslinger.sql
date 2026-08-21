@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "classes_teacher_id_name_active_unique" ON "classes" USING btree ("teacher_id","name") WHERE "classes"."deleted_at" is null;
