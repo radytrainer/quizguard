@@ -127,6 +127,67 @@ describe("parseJsonQuestions", () => {
     expect(() => parseJsonQuestions("[]")).toThrow();
   });
 
+  it("throws a conflict error when the batch mixes more than one subject", () => {
+    expect(() =>
+      parseJsonQuestions(
+        JSON.stringify([
+          {
+            question: "What is the capital of France?",
+            options: ["London", "Paris"],
+            correctAnswer: "Paris",
+            subject: "Geography",
+          },
+          {
+            question: "Which of these are prime numbers?",
+            type: "multiple_answer",
+            options: ["2", "4"],
+            correctAnswer: ["2"],
+            subject: "Math",
+          },
+        ]),
+      ),
+    ).toThrow(/same subject/);
+  });
+
+  it("allows a batch where every question shares the same subject", () => {
+    const parsed = parseJsonQuestions(
+      JSON.stringify([
+        {
+          question: "What is the capital of France?",
+          options: ["London", "Paris"],
+          correctAnswer: "Paris",
+          subject: "Geography",
+        },
+        {
+          question: "What is the capital of Japan?",
+          options: ["Tokyo", "Osaka"],
+          correctAnswer: "Tokyo",
+          subject: "Geography",
+        },
+      ]),
+    );
+    expect(parsed.rows).toHaveLength(2);
+  });
+
+  it("doesn't flag a mixed batch just because some rows omit subject entirely", () => {
+    const parsed = parseJsonQuestions(
+      JSON.stringify([
+        {
+          question: "What is the capital of France?",
+          options: ["London", "Paris"],
+          correctAnswer: "Paris",
+          subject: "Geography",
+        },
+        {
+          question: "No subject here",
+          options: ["A", "B"],
+          correctAnswer: "A",
+        },
+      ]),
+    );
+    expect(parsed.rows).toHaveLength(2);
+  });
+
   it("produces headers identical to IMPORT_FIELDS, so mapping is fully automatic", () => {
     const parsed = parseJsonQuestions(
       JSON.stringify([

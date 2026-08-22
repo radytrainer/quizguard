@@ -46,6 +46,8 @@ import {
 // a human reviewing the pasted JSON can actually read. `multiple_answer` takes an array;
 // `short_answer` / `fill_in_blank` skip `correctAnswer` entirely — every listed option is an
 // accepted answer variant. All fields except `question`, `subject`, and the options are optional.
+// Both entries share one `subject` deliberately — json-parser.ts rejects a batch with more than
+// one distinct subject, so the sample has to model the rule it's teaching.
 const SAMPLE_JSON = `[
   {
     "question": "What is the capital of France?",
@@ -58,11 +60,11 @@ const SAMPLE_JSON = `[
     "explanation": "Paris has been the capital of France since 987 AD."
   },
   {
-    "question": "Which of these are prime numbers?",
+    "question": "Which of these are countries in Europe?",
     "type": "multiple_answer",
-    "options": ["2", "4", "5", "9"],
-    "correctAnswer": ["2", "5"],
-    "subject": "Math",
+    "options": ["France", "Japan", "Germany", "Brazil"],
+    "correctAnswer": ["France", "Germany"],
+    "subject": "Geography",
     "difficulty": "medium",
     "points": 2
   }
@@ -557,7 +559,8 @@ export function ImportPage() {
                 </CardTitle>
                 <CardDescription>
                   Ask an AI to generate questions in the format below, then
-                  paste its output directly — no file needed.
+                  paste its output directly — no file needed. All questions in
+                  one paste must share the same subject.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">

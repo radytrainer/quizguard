@@ -95,8 +95,24 @@ export function parseJsonQuestions(text: string): ParsedFile {
     );
   }
 
+  const rows = data.map(toFlatRow);
+
+  // A pasted batch is meant to be one topic at a time (e.g. "10 questions about
+  // Photosynthesis") — mixed subjects almost always means the AI/teacher drifted off-topic
+  // mid-batch, not an intentional multi-subject import. Caught once here, before the per-row
+  // pipeline, so it's one clear error instead of N confusing per-row ones. Rows missing a
+  // subject entirely are left to parseImportRow's own "Missing subject" check.
+  const subjects = new Set(
+    rows.map((row) => row.subject.trim()).filter(Boolean),
+  );
+  if (subjects.size > 1) {
+    throw conflict(
+      `All questions in a pasted batch must use the same subject — found ${subjects.size}: ${[...subjects].join(", ")}. Paste one subject at a time.`,
+    );
+  }
+
   return {
     headers: [...IMPORT_FIELDS],
-    rows: data.map(toFlatRow),
+    rows,
   };
 }
