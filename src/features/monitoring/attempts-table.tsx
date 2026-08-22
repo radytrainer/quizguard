@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Lock, Search } from "lucide-react";
+import { Download, Lock, Search } from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,8 @@ function flagBadgeClassName(count: number): string {
 
 type Filter = "all" | "in_progress" | "flagged" | "locked" | "submitted";
 
+const PAGE_SIZE = 15;
+
 export function AttemptsTable({
   quizId,
   attempts,
@@ -48,13 +50,20 @@ export function AttemptsTable({
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [page, setPage] = useState(1);
   const [unlocking, setUnlocking] = useState<string | null>(null);
 
-  const visible = useMemo(() => {
+  const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return attempts
       .filter((a) => {
-        if (query && !a.studentName.toLowerCase().includes(query)) return false;
+        if (
+          query &&
+          !a.studentName.toLowerCase().includes(query) &&
+          !(a.studentEmail?.toLowerCase().includes(query) ?? false)
+        ) {
+          return false;
+        }
         if (filter === "in_progress") return a.status === "in_progress";
         if (filter === "flagged") return a.violationCount > 0;
         if (filter === "locked") return a.locked;
@@ -72,6 +81,27 @@ export function AttemptsTable({
       });
   }, [attempts, search, filter]);
 
+  // A page number only makes sense against the list it was computed for — reset to page 1
+  // whenever a filter/search change swaps the filtered set out from under it. Done inline in
+  // each handler (below) rather than an effect keyed on the same state, to avoid a synchronous
+  // setState-in-effect (see react-hooks/set-state-in-effect).
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
+
+  function handleFilterChange(value: Filter) {
+    setFilter(value);
+    setPage(1);
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, totalPages);
+  const visible = filtered.slice(
+    (clampedPage - 1) * PAGE_SIZE,
+    clampedPage * PAGE_SIZE,
+  );
+
   async function handleUnlockClick(attemptId: string) {
     setUnlocking(attemptId);
     try {
@@ -83,9 +113,12 @@ export function AttemptsTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
-          <TabsList>
+      <div className="bg-card border-border flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 shadow-sm">
+        <Tabs
+          value={filter}
+          onValueChange={(v) => handleFilterChange(v as Filter)}
+        >
+          <TabsList className="flex-wrap">
             <TabsTrigger value="all">All ({attempts.length})</TabsTrigger>
             <TabsTrigger value="in_progress">
               In progress (
@@ -103,19 +136,27 @@ export function AttemptsTable({
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="relative w-full sm:w-64">
-          <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
-          <Input
-            placeholder="Search students..."
-            className="pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search students"
-          />
+        <div className="flex flex-1 items-center justify-end gap-2">
+          <div className="relative w-full sm:w-64">
+            <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+            <Input
+              placeholder="Search name or email..."
+              className="pl-9"
+              value={search}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              aria-label="Search students"
+            />
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <a href={`/api/quizzes/${quizId}/attempts/export`} download>
+              <Download className="size-4" />
+              Export
+            </a>
+          </Button>
         </div>
       </div>
 
-      <div className="bg-card border-outline-variant overflow-hidden rounded-xl border shadow-sm">
+      <div className="bg-card border-border overflow-hidden rounded-xl border shadow-sm">
         <Table>
           <TableHeader>
             <TableRow>
@@ -148,7 +189,14 @@ export function AttemptsTable({
                     href={`/teacher/quizzes/${quizId}/attempts/${attempt.id}`}
                     className="hover:underline"
                   >
-                    {attempt.studentName}
+                    <div className="flex flex-col">
+                      <span>{attempt.studentName}</span>
+                      {attempt.studentEmail && (
+                        <span className="text-muted-foreground text-xs font-normal">
+                          {attempt.studentEmail}
+                        </span>
+                      )}
+                    </div>
                   </Link>
                 </TableCell>
                 <TableCell className="font-mono text-sm">
@@ -208,6 +256,37 @@ export function AttemptsTable({
             ))}
           </TableBody>
         </Table>
+
+        {filtered.length > 0 && (
+          <div className="border-border text-muted-foreground flex flex-wrap items-center justify-between gap-2 border-t px-6 py-3 text-xs">
+            <span>
+              Showing {(clampedPage - 1) * PAGE_SIZE + 1}-
+              {Math.min(clampedPage * PAGE_SIZE, filtered.length)} of{" "}
+              {filtered.length} attempt{filtered.length === 1 ? "" : "s"}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={clampedPage <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </Button>
+              <span>
+                Page {clampedPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={clampedPage >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

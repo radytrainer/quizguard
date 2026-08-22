@@ -114,6 +114,7 @@ export interface AttemptSummary {
   id: string;
   studentId: string;
   studentName: string;
+  studentEmail: string;
   status: AttemptStatus;
   attemptNumber: number;
   startedAt: Date;
@@ -144,6 +145,7 @@ export async function listAttemptsForQuiz(
       id: examAttempts.id,
       studentId: examAttempts.studentId,
       studentName: users.name,
+      studentEmail: users.email,
       status: examAttempts.status,
       attemptNumber: examAttempts.attemptNumber,
       startedAt: examAttempts.startedAt,
@@ -158,7 +160,7 @@ export async function listAttemptsForQuiz(
     .innerJoin(users, eq(users.id, examAttempts.studentId))
     .leftJoin(examViolations, eq(examViolations.attemptId, examAttempts.id))
     .where(eq(examAttempts.quizId, quizId))
-    .groupBy(examAttempts.id, users.name)
+    .groupBy(examAttempts.id, users.name, users.email)
     .orderBy(desc(examAttempts.startedAt));
 }
 
@@ -195,6 +197,10 @@ export async function getActivityHistory(
 ): Promise<ActivityHistoryEvent[]> {
   await requireQuizExists(quizId);
 
+  // Each source is bounded server-side (not just the final `.slice` below) — without this, a
+  // quiz's cumulative history keeps costing more to query every exam period even though only
+  // MAX_ACTIVITY_HISTORY rows are ever returned. desc-ordering each source before the cap keeps
+  // the most-recent rows from every source in the merged/sorted result.
   const attemptRows = await db
     .select({
       id: examAttempts.id,
@@ -209,7 +215,9 @@ export async function getActivityHistory(
     })
     .from(examAttempts)
     .innerJoin(users, eq(users.id, examAttempts.studentId))
-    .where(eq(examAttempts.quizId, quizId));
+    .where(eq(examAttempts.quizId, quizId))
+    .orderBy(desc(examAttempts.startedAt))
+    .limit(MAX_ACTIVITY_HISTORY);
 
   const violationRows = await db
     .select({
@@ -222,7 +230,9 @@ export async function getActivityHistory(
     .from(examViolations)
     .innerJoin(examAttempts, eq(examAttempts.id, examViolations.attemptId))
     .innerJoin(users, eq(users.id, examAttempts.studentId))
-    .where(eq(examAttempts.quizId, quizId));
+    .where(eq(examAttempts.quizId, quizId))
+    .orderBy(desc(examViolations.occurredAt))
+    .limit(MAX_ACTIVITY_HISTORY);
 
   const lockRows = await db
     .select({
@@ -235,7 +245,9 @@ export async function getActivityHistory(
     .from(attemptLockEvents)
     .innerJoin(examAttempts, eq(examAttempts.id, attemptLockEvents.attemptId))
     .innerJoin(users, eq(users.id, examAttempts.studentId))
-    .where(eq(examAttempts.quizId, quizId));
+    .where(eq(examAttempts.quizId, quizId))
+    .orderBy(desc(attemptLockEvents.occurredAt))
+    .limit(MAX_ACTIVITY_HISTORY);
 
   const events: ActivityHistoryEvent[] = [];
 
@@ -325,6 +337,7 @@ export async function getAttemptDetailForTeacher(
       id: examAttempts.id,
       studentId: examAttempts.studentId,
       studentName: users.name,
+      studentEmail: users.email,
       status: examAttempts.status,
       attemptNumber: examAttempts.attemptNumber,
       startedAt: examAttempts.startedAt,

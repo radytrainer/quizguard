@@ -7,6 +7,7 @@ import {
   Lock,
   Maximize2,
   Minimize2,
+  Search,
   ShieldAlert,
   Users,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { AttemptsTable } from "@/features/monitoring/attempts-table";
 import {
@@ -40,6 +42,9 @@ export interface LiveAttempt {
   id: string;
   studentId: string;
   studentName: string;
+  // Optional for the same reason as `attemptNumber` above — a row added live from an
+  // `attempt_started` event doesn't carry it, since the event schema never included it either.
+  studentEmail?: string;
   status: "in_progress" | "submitted" | "auto_submitted";
   attemptNumber?: number;
   startedAt: Date;
@@ -143,7 +148,9 @@ export function LiveMonitor({
   initialEvents: LiveEvent[];
 }) {
   const [present, setPresent] = useState<PresenceEntry[]>([]);
+  const [presentSearch, setPresentSearch] = useState("");
   const [events, setEvents] = useState<LiveEvent[]>(initialEvents);
+  const [eventSearch, setEventSearch] = useState("");
   const [attempts, setAttempts] = useState<LiveAttempt[]>(initialAttempts);
   const [storyAttemptId, setStoryAttemptId] = useState<string | null>(null);
 
@@ -265,6 +272,20 @@ export function LiveMonitor({
     () => attempts.filter((a) => a.locked).length,
     [attempts],
   );
+  const visiblePresent = useMemo(() => {
+    const query = presentSearch.trim().toLowerCase();
+    if (!query) return present;
+    return present.filter((entry) =>
+      entry.studentName.toLowerCase().includes(query),
+    );
+  }, [present, presentSearch]);
+  const visibleEvents = useMemo(() => {
+    const query = eventSearch.trim().toLowerCase();
+    if (!query) return events;
+    return events.filter((event) =>
+      event.studentName.toLowerCase().includes(query),
+    );
+  }, [events, eventSearch]);
 
   // Shared by the attempts table's row action and the story dialog's own unlock button, so both
   // stay in sync with a single source of truth (`attempts`) instead of each independently
@@ -377,22 +398,41 @@ export function LiveMonitor({
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
+              {present.length > 5 && (
+                <div className="relative mb-1">
+                  <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+                  <Input
+                    placeholder="Find a student…"
+                    className="h-8 pl-9 text-sm"
+                    value={presentSearch}
+                    onChange={(e) => setPresentSearch(e.target.value)}
+                    aria-label="Search students currently taking the quiz"
+                  />
+                </div>
+              )}
               {present.length === 0 && (
                 <p className="text-muted-foreground text-sm">
                   No one is currently taking this quiz.
                 </p>
               )}
-              {present.map((entry) => (
-                <button
-                  key={entry.attemptId}
-                  type="button"
-                  onClick={() => setStoryAttemptId(entry.attemptId)}
-                  className="border-outline-variant hover:bg-secondary/50 flex items-center gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors"
-                >
-                  <span className="bg-success inline-block size-2 shrink-0 rounded-full" />
-                  {entry.studentName}
-                </button>
-              ))}
+              {present.length > 0 && visiblePresent.length === 0 && (
+                <p className="text-muted-foreground text-sm">
+                  No students match &quot;{presentSearch}&quot;.
+                </p>
+              )}
+              <div className="flex max-h-72 flex-col gap-2 overflow-y-auto">
+                {visiblePresent.map((entry) => (
+                  <button
+                    key={entry.attemptId}
+                    type="button"
+                    onClick={() => setStoryAttemptId(entry.attemptId)}
+                    className="border-border hover:bg-secondary/50 flex items-center gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors"
+                  >
+                    <span className="bg-success inline-block size-2 shrink-0 rounded-full" />
+                    {entry.studentName}
+                  </button>
+                ))}
+              </div>
             </CardContent>
           </Card>
 
@@ -404,33 +444,52 @@ export function LiveMonitor({
                 activity — updating live as things happen.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex max-h-80 flex-col gap-2 overflow-y-auto">
+            <CardContent className="flex flex-col gap-2">
+              {events.length > 5 && (
+                <div className="relative mb-1">
+                  <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+                  <Input
+                    placeholder="Find a student…"
+                    className="h-8 pl-9 text-sm"
+                    value={eventSearch}
+                    onChange={(e) => setEventSearch(e.target.value)}
+                    aria-label="Search activity by student"
+                  />
+                </div>
+              )}
               {events.length === 0 && (
                 <p className="text-muted-foreground text-sm">
                   Nothing has happened for this exam yet.
                 </p>
               )}
-              {events.map((event, index) => (
-                <button
-                  key={`${event.attemptId}-${event.occurredAt}-${index}`}
-                  type="button"
-                  onClick={() => setStoryAttemptId(event.attemptId)}
-                  className="hover:bg-secondary/50 -mx-1 flex items-center gap-2 rounded-md px-1 py-1 text-left text-sm transition-colors"
-                >
-                  <Badge
-                    variant="outline"
-                    className={cn("shrink-0", eventBadgeClassName(event))}
+              {events.length > 0 && visibleEvents.length === 0 && (
+                <p className="text-muted-foreground text-sm">
+                  No activity matches &quot;{eventSearch}&quot;.
+                </p>
+              )}
+              <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
+                {visibleEvents.map((event, index) => (
+                  <button
+                    key={`${event.attemptId}-${event.occurredAt}-${index}`}
+                    type="button"
+                    onClick={() => setStoryAttemptId(event.attemptId)}
+                    className="hover:bg-secondary/50 -mx-1 flex items-center gap-2 rounded-md px-1 py-1 text-left text-sm transition-colors"
                   >
-                    {event.studentName}
-                  </Badge>
-                  <span className="text-muted-foreground flex-1 truncate">
-                    {eventVerb(event)}
-                  </span>
-                  <Badge variant="outline" className="shrink-0 text-xs">
-                    {new Date(event.occurredAt).toLocaleTimeString()}
-                  </Badge>
-                </button>
-              ))}
+                    <Badge
+                      variant="outline"
+                      className={cn("shrink-0", eventBadgeClassName(event))}
+                    >
+                      {event.studentName}
+                    </Badge>
+                    <span className="text-muted-foreground flex-1 truncate">
+                      {eventVerb(event)}
+                    </span>
+                    <Badge variant="outline" className="shrink-0 text-xs">
+                      {new Date(event.occurredAt).toLocaleTimeString()}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
             </CardContent>
           </Card>
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -496,6 +497,11 @@ export function ExamAttempt({
               )}
               {attempt.passed ? "Passed" : "Not passed"}
             </Badge>
+          )}
+          {!inProgress && (
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/student">Back to Dashboard</Link>
+            </Button>
           )}
           {inProgress && !fullscreenGateActive && !lockedActive && (
             <Button
