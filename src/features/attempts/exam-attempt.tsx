@@ -146,6 +146,7 @@ export function ExamAttempt({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
   const [violationCount, setViolationCount] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
   const { flagged, toggle: toggleFlag } = useFlaggedQuestions(attempt.id);
@@ -267,11 +268,31 @@ export function ExamAttempt({
   }, [inProgress, attempt.id]);
 
   async function enterFullscreen() {
+    setFullscreenError(null);
+
+    // Distinguishes "the browser/OS won't allow fullscreen at all here" (Permissions-Policy,
+    // a locked-down browser/enterprise policy, some remote-desktop sessions) from "the request
+    // itself was rejected" below — this check never throws, so it's worth doing first for a
+    // clearer message than whatever generic error requestFullscreen() would reject with.
+    if (!document.fullscreenEnabled) {
+      setFullscreenError(
+        "Fullscreen isn't available in this browser right now. It may be disabled by a browser or system policy — try a different browser (Chrome or Edge) or device, or ask your administrator.",
+      );
+      return;
+    }
+
     try {
       await document.documentElement.requestFullscreen();
-    } catch {
-      // Some browsers/embeds refuse fullscreen (e.g. no user-gesture context detected); the
-      // gate just stays up and the student can retry.
+    } catch (err) {
+      // Was previously swallowed entirely — logged and surfaced now so a student isn't stuck
+      // against a silently-dead button, and so the actual browser-reported reason is visible
+      // for diagnosis (this rejects for several distinct reasons: no direct user-gesture
+      // context, a prior permission denial, etc. — the message differs by browser).
+      console.error("requestFullscreen() failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      setFullscreenError(
+        `Couldn't enter fullscreen (${reason}). Try clicking the button again, or use a different browser.`,
+      );
     }
   }
 
@@ -546,6 +567,11 @@ export function ExamAttempt({
             <Button onClick={() => void enterFullscreen()}>
               Enter Fullscreen &amp; Continue
             </Button>
+            {fullscreenError && (
+              <p role="alert" className="text-destructive max-w-sm text-sm">
+                {fullscreenError}
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

@@ -33,7 +33,11 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=(), payment=()",
+            // fullscreen=(self) is explicit, not just relying on its own default allowlist
+            // (also *) — Exam Mode (features/attempts/exam-attempt.tsx) depends on
+            // document.requestFullscreen() working for this origin's own top-level document.
+            value:
+              "camera=(), microphone=(), geolocation=(), payment=(), fullscreen=(self)",
           },
           // `includeSubDomains`/`preload` are commitments about the production domain's own
           // subdomains — still Phase 13's call to make, deferred to whichever real domain
