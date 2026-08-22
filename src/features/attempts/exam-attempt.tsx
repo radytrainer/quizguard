@@ -529,10 +529,15 @@ export function ExamAttempt({
         <div className="border-warning/30 bg-warning/5 text-warning flex items-start gap-2 rounded-lg border p-3 text-sm">
           <Eye className="mt-0.5 size-4 shrink-0" />
           <p>
-            This exam is monitored: exiting fullscreen{" "}
-            {attempt.monitorActivity && "or switching tabs "}
-            is recorded and visible to your teacher. Nothing outside this
-            browser tab is seen or recorded.
+            This exam is monitored:{" "}
+            {[
+              attempt.fullscreenRequired && "exiting fullscreen",
+              attempt.monitorActivity && "switching tabs",
+            ]
+              .filter(Boolean)
+              .join(" or ")}{" "}
+            will lock your exam and is visible to your teacher. Nothing outside
+            this browser tab is seen or recorded.
           </p>
         </div>
       )}
@@ -544,9 +549,10 @@ export function ExamAttempt({
             <div>
               <p className="font-medium">This exam has been locked</p>
               <p className="text-muted-foreground mt-1 max-w-md text-sm">
-                You exited fullscreen after starting. Your teacher can see this
-                and needs to unlock your attempt before you can continue — your
-                timer keeps running while you wait.
+                Monitored activity (exiting fullscreen or switching tabs) was
+                detected during this exam. Your teacher can see this and needs
+                to unlock your attempt before you can continue — your timer
+                keeps running while you wait.
               </p>
             </div>
           </CardContent>

@@ -24,10 +24,13 @@ import {
 } from "@/database/schema";
 import type { RecordViolationInput } from "@/backend/monitoring/monitoring.schema";
 
-/** Records the violation, and — for a fullscreen exit on a quiz that requires fullscreen —
- * locks the attempt so no further answers/submission are accepted until a teacher unlocks it
- * (Section 10). Returns whether this call locked the attempt, so the API route can tell the
- * student's own tab immediately without waiting on the realtime round trip. */
+/** Records the violation, and — for a fullscreen exit on a quiz that requires fullscreen, or a
+ * tab switch on a quiz with activity monitoring on — locks the attempt so no further
+ * answers/submission are accepted until a teacher unlocks it (Section 10). Re-checks the quiz's
+ * own settings server-side rather than trusting that the client only sends a violation type
+ * when the corresponding setting is on. Returns whether this call locked the attempt, so the
+ * API route can tell the student's own tab immediately without waiting on the realtime round
+ * trip. */
 export async function recordViolation(
   attempt: ExamAttempt,
   input: RecordViolationInput,
@@ -37,13 +40,21 @@ export async function recordViolation(
     .values({ attemptId: attempt.id, type: input.type });
 
   let locked = false;
-  if (input.type === "fullscreen_exit") {
+  if (input.type === "fullscreen_exit" || input.type === "tab_switch") {
     const [quiz] = await db
-      .select({ fullscreenRequired: quizzes.fullscreenRequired })
+      .select({
+        fullscreenRequired: quizzes.fullscreenRequired,
+        monitorActivity: quizzes.monitorActivity,
+      })
       .from(quizzes)
       .where(eq(quizzes.id, attempt.quizId))
       .limit(1);
-    if (quiz?.fullscreenRequired) {
+
+    const shouldLock =
+      (input.type === "fullscreen_exit" && quiz?.fullscreenRequired) ||
+      (input.type === "tab_switch" && quiz?.monitorActivity);
+
+    if (shouldLock) {
       locked = true;
       await db
         .update(examAttempts)
