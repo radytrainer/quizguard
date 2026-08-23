@@ -25,7 +25,7 @@ import type {
   LiveRosterEntry,
 } from "@/backend/live/live.schema";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
-import { LIVE_OPTION_STYLES } from "@/features/live/option-styles";
+import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { cn } from "@/lib/utils";
 
 type Phase =
@@ -205,13 +205,14 @@ export function LiveHostView({
           {origin && (
             <div className="flex flex-col items-center gap-2">
               <div className="w-fit rounded-xl border bg-white p-3">
-                <QRCodeSVG
-                  value={`${origin}/student?code=${joinCode}`}
-                  size={160}
-                />
+                <QRCodeSVG value={`${origin}/play/${sessionId}`} size={160} />
               </div>
               <p className="text-muted-foreground text-xs">
-                Scan to join with this code
+                Scan to join — no account needed
+              </p>
+              <p className="text-muted-foreground text-xs">
+                or go to <span className="font-medium">{origin}/play</span>{" "}
+                and enter the code
               </p>
             </div>
           )}
@@ -250,20 +251,24 @@ export function LiveHostView({
           <Progress value={remainingPercent} className="h-2" />
           <p className="text-center text-lg font-semibold">{question.text}</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {question.options.map((option, i) => (
-              <div
-                key={option.id}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl p-4 font-medium",
-                  LIVE_OPTION_STYLES[i % LIVE_OPTION_STYLES.length].className,
-                )}
-              >
-                <span className="text-xl">
-                  {LIVE_OPTION_STYLES[i % LIVE_OPTION_STYLES.length].shape}
-                </span>
-                {option.text}
-              </div>
-            ))}
+            {question.options.map((option, i) => {
+              const { Icon, className } = getLiveOptionStyle(
+                question.questionIndex,
+                i,
+              );
+              return (
+                <div
+                  key={option.id}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl p-4 font-medium",
+                    className,
+                  )}
+                >
+                  <Icon className="size-5 shrink-0" />
+                  {option.text}
+                </div>
+              );
+            })}
           </div>
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground text-sm">
@@ -287,19 +292,21 @@ export function LiveHostView({
             {question.options.map((option, i) => {
               const isCorrect = reveal.correctOptionIds.includes(option.id);
               const picks = reveal.distribution[option.id] ?? 0;
+              const { Icon, className } = getLiveOptionStyle(
+                question.questionIndex,
+                i,
+              );
               return (
                 <div
                   key={option.id}
                   className={cn(
                     "flex items-center justify-between gap-3 rounded-xl p-4 font-medium",
-                    LIVE_OPTION_STYLES[i % LIVE_OPTION_STYLES.length].className,
+                    className,
                     !isCorrect && "opacity-50",
                   )}
                 >
                   <span className="flex items-center gap-2">
-                    <span className="text-xl">
-                      {LIVE_OPTION_STYLES[i % LIVE_OPTION_STYLES.length].shape}
-                    </span>
+                    <Icon className="size-5 shrink-0" />
                     {option.text}
                     {isCorrect && <CheckCircle2 className="size-4" />}
                   </span>

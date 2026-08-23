@@ -19,7 +19,7 @@ import type {
   LiveStateSync,
   LiveYourResult,
 } from "@/backend/live/live.schema";
-import { LIVE_OPTION_STYLES } from "@/features/live/option-styles";
+import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +33,16 @@ type Phase =
   | "finished"
   | "cancelled";
 
-export function LivePlayerView({ sessionId }: { sessionId: string }) {
+export function LivePlayerView({
+  sessionId,
+  guestName,
+}: {
+  sessionId: string;
+  // Set only by the no-account "anyone with the code" path (features/live/guest-join.tsx) —
+  // an authenticated student/host is identified from their session cookie instead, same as
+  // every other realtime feature in this app.
+  guestName?: string;
+}) {
   const [phase, setPhase] = useState<Phase>("connecting");
   const [quizTitle, setQuizTitle] = useState("");
   const [question, setQuestion] = useState<LiveQuestionView | null>(null);
@@ -48,12 +57,34 @@ export function LivePlayerView({ sessionId }: { sessionId: string }) {
   const [standings, setStandings] = useState<LiveLeaderboardEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Persisted per session (not per game — a new sessionId always gets a fresh token) so a
+  // guest's own tab reconnecting (a refresh, a brief network drop) resumes the same
+  // participant row and score instead of joining as a second player. Never sent anywhere for
+  // an authenticated join, and never written to anything durable beyond this tab.
+  const [guestToken] = useState(() => {
+    if (!guestName || typeof window === "undefined") return null;
+    const key = `qg:guest-token:${sessionId}`;
+    try {
+      const existing = window.sessionStorage.getItem(key);
+      if (existing) return existing;
+      const token = crypto.randomUUID();
+      window.sessionStorage.setItem(key, token);
+      return token;
+    } catch {
+      // sessionStorage can be blocked (private mode, disabled storage) — fall back to an
+      // in-memory token, which still lets the guest play, just without surviving a refresh.
+      return crypto.randomUUID();
+    }
+  });
 
   useEffect(() => {
     const socket = getRealtimeSocket();
 
     function join() {
-      socket.emit("live:join", { sessionId });
+      socket.emit(
+        "live:join",
+        guestName && guestToken ? { sessionId, guestName, guestToken } : { sessionId },
+      );
     }
     function onStateSync(state: LiveStateSync) {
       setQuizTitle(state.quizTitle);
@@ -135,7 +166,7 @@ export function LivePlayerView({ sessionId }: { sessionId: string }) {
       socket.off("live:ended", onEnded);
       socket.off("live:error", onErrorEvent);
     };
-  }, [sessionId]);
+  }, [sessionId, guestName, guestToken]);
 
   useEffect(() => {
     if (phase !== "question") return;
@@ -234,8 +265,10 @@ export function LivePlayerView({ sessionId }: { sessionId: string }) {
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {question.options.map((option, i) => {
-                  const style =
-                    LIVE_OPTION_STYLES[i % LIVE_OPTION_STYLES.length];
+                  const { Icon, className } = getLiveOptionStyle(
+                    question.questionIndex,
+                    i,
+                  );
                   const isSelected = selected.includes(option.id);
                   return (
                     <button
@@ -248,11 +281,11 @@ export function LivePlayerView({ sessionId }: { sessionId: string }) {
                       }
                       className={cn(
                         "flex items-center gap-3 rounded-xl p-5 text-left font-medium transition-transform active:scale-95",
-                        style.className,
+                        className,
                         isSelected && "ring-foreground/60 ring-4",
                       )}
                     >
-                      <span className="text-xl">{style.shape}</span>
+                      <Icon className="size-5 shrink-0" />
                       {option.text}
                     </button>
                   );
@@ -296,18 +329,21 @@ export function LivePlayerView({ sessionId }: { sessionId: string }) {
           )}
           <div className="mt-2 flex w-full flex-col gap-2">
             {question.options.map((option, i) => {
-              const style = LIVE_OPTION_STYLES[i % LIVE_OPTION_STYLES.length];
+              const { Icon, className } = getLiveOptionStyle(
+                question.questionIndex,
+                i,
+              );
               const isCorrect = correctOptionIds.includes(option.id);
               return (
                 <div
                   key={option.id}
                   className={cn(
                     "flex items-center gap-3 rounded-xl p-3 text-left font-medium",
-                    style.className,
+                    className,
                     !isCorrect && "opacity-50",
                   )}
                 >
-                  <span>{style.shape}</span>
+                  <Icon className="size-4 shrink-0" />
                   {option.text}
                   {isCorrect && <CheckCircle2 className="ml-auto size-4" />}
                 </div>
@@ -370,7 +406,9 @@ export function LivePlayerView({ sessionId }: { sessionId: string }) {
             </div>
           )}
           <Button asChild>
-            <Link href="/student">Back to Dashboard</Link>
+            <Link href={guestName ? "/play" : "/student"}>
+              {guestName ? "Play another game" : "Back to Dashboard"}
+            </Link>
           </Button>
         </div>
       )}
@@ -380,7 +418,9 @@ export function LivePlayerView({ sessionId }: { sessionId: string }) {
           <XCircle className="text-muted-foreground size-10" />
           <p className="font-medium">This game was ended by the host.</p>
           <Button asChild variant="secondary">
-            <Link href="/student">Back to Dashboard</Link>
+            <Link href={guestName ? "/play" : "/student"}>
+              {guestName ? "Play another game" : "Back to Dashboard"}
+            </Link>
           </Button>
         </div>
       )}

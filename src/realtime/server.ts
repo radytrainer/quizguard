@@ -36,6 +36,7 @@ import {
   getRoster,
   getSessionState,
   joinSession,
+  joinSessionAsGuest,
   requireSession,
   revealAnswer,
   showLeaderboard,
@@ -146,8 +147,8 @@ async function requireHost(
   socket: Socket,
   sessionId: string,
 ): Promise<LiveSession | null> {
-  const user = socket.data.user as AuthUser;
-  if (user.role !== "teacher" && user.role !== "admin") return null;
+  const user = socket.data.user as AuthUser | null;
+  if (!user || (user.role !== "teacher" && user.role !== "admin")) return null;
   try {
     const session = await requireSession(sessionId);
     if (session.hostId !== user.id && user.role !== "admin") return null;
@@ -188,30 +189,27 @@ async function triggerReveal(sessionId: string) {
   }
 }
 
+// Unlike every other feature here, a live game's "anyone with the code" mode (Section: guest
+// play, host-setup-form.tsx) is reachable with no session cookie at all — so this middleware no
+// longer rejects a missing/invalid token outright, it just leaves `socket.data.user` unset.
+// Every handler below that needs a real account (monitoring presence, exam-attempt presence,
+// hosting) checks for that itself; only `live:join`/`live:answer` accept a null user, and only
+// down the guest branch.
 io.use(async (socket, next) => {
   const token = parseCookie(
     socket.handshake.headers.cookie,
     SESSION_COOKIE_NAME,
   );
-  if (!token) {
-    next(new Error("Unauthorized"));
-    return;
-  }
-  const user = await getUserBySessionToken(token);
-  if (!user) {
-    next(new Error("Unauthorized"));
-    return;
-  }
-  socket.data.user = user;
+  socket.data.user = token ? await getUserBySessionToken(token) : null;
   next();
 });
 
 io.on("connection", (socket: Socket) => {
-  const user = socket.data.user as AuthUser;
+  const user = socket.data.user as AuthUser | null;
 
   // Teacher/admin: watch a quiz's live activity (presence + events).
   socket.on("join:quiz", (quizId: unknown) => {
-    if (user.role !== "teacher" && user.role !== "admin") return;
+    if (!user || (user.role !== "teacher" && user.role !== "admin")) return;
     if (typeof quizId !== "string") return;
     void socket.join(`quiz:${quizId}`);
     socket.emit("presence:snapshot", presenceList(quizId));
@@ -220,7 +218,7 @@ io.on("connection", (socket: Socket) => {
   // Student: announce presence on their own attempt, verified server-side against the DB —
   // never trust a client-asserted quizId/studentId pairing here.
   socket.on("join:attempt", async (attemptId: unknown) => {
-    if (user.role !== "student") return;
+    if (!user || user.role !== "student") return;
     if (typeof attemptId !== "string") return;
 
     const [attempt] = await db
@@ -282,27 +280,34 @@ io.on("connection", (socket: Socket) => {
   // in-memory socket state: a brief disconnect never drops a student's progress, only their
   // live connection (they resync via live:join's live:state_sync on reconnect).
 
+  // Shared by both join paths below (authenticated student and anonymous guest) — same
+  // participant-joined side effects either way: remember which room this socket represents,
+  // sync its own state, and tell the room the roster changed.
+  async function announceParticipantJoin(
+    sessionId: string,
+    participantId: string,
+  ) {
+    socket.data.liveSessionId = sessionId;
+    socket.data.liveParticipantId = participantId;
+    void socket.join(`live:${sessionId}`);
+
+    socket.emit(
+      "live:state_sync",
+      await getSessionState(sessionId, participantId),
+    );
+    io.to(`live:${sessionId}`).emit("live:roster", await getRoster(sessionId));
+  }
+
   socket.on("live:join", async (payload: unknown) => {
     const parsed = liveJoinSchema.safeParse(payload);
     if (!parsed.success) return;
-    const { sessionId } = parsed.data;
+    const { sessionId, guestName, guestToken } = parsed.data;
 
     try {
-      if (user.role === "student") {
-        const participant = await joinSession(sessionId, user.id);
-        socket.data.liveSessionId = sessionId;
-        socket.data.liveParticipantId = participant.id;
-        void socket.join(`live:${sessionId}`);
-
-        socket.emit(
-          "live:state_sync",
-          await getSessionState(sessionId, user.id),
-        );
-        io.to(`live:${sessionId}`).emit(
-          "live:roster",
-          await getRoster(sessionId),
-        );
-      } else if (user.role === "teacher" || user.role === "admin") {
+      if (user?.role === "student") {
+        const participant = await joinSession(sessionId, user.id, user.name);
+        await announceParticipantJoin(sessionId, participant.id);
+      } else if (user?.role === "teacher" || user?.role === "admin") {
         const session = await requireSession(sessionId);
         if (session.hostId !== user.id && user.role !== "admin") {
           socket.emit("live:error", "You are not the host of this game");
@@ -322,23 +327,43 @@ io.on("connection", (socket: Socket) => {
             await getQuestionView(session, session.currentQuestionIndex),
           );
         }
+      } else if (guestName && guestToken) {
+        // No account: "anyone with the code" play (host-setup-form.tsx). joinSessionAsGuest
+        // itself rejects a class-restricted session — a guest can't be checked against
+        // classStudents the way an enrolled student can.
+        const participant = await joinSessionAsGuest(
+          sessionId,
+          guestToken,
+          guestName,
+        );
+        await announceParticipantJoin(sessionId, participant.id);
+      } else {
+        socket.emit("live:error", "Enter your name to join this game.");
       }
     } catch (err) {
       socket.emit("live:error", errorMessage(err));
     }
   });
 
-  // Student answering the current question. One shot per question — submitAnswer() enforces
-  // that at the DB level (a unique index), this handler just surfaces the rejection.
+  // Answering the current question — an authenticated student or a guest, either way identified
+  // by the participantId `live:join` already verified and stashed on this socket (never a role
+  // check here, since a guest has no role at all). One shot per question — submitAnswer()
+  // enforces that at the DB level (a unique index), this handler just surfaces the rejection.
   socket.on("live:answer", async (payload: unknown) => {
-    if (user.role !== "student") return;
+    const participantId = socket.data.liveParticipantId as string | undefined;
+    if (!participantId) return;
     const parsed = liveAnswerSchema.safeParse(payload);
     if (!parsed.success) return;
     const { sessionId, questionIndex, selectedOptionIds } = parsed.data;
     if (socket.data.liveSessionId !== sessionId) return;
 
     try {
-      await submitAnswer(sessionId, user.id, questionIndex, selectedOptionIds);
+      await submitAnswer(
+        sessionId,
+        participantId,
+        questionIndex,
+        selectedOptionIds,
+      );
       // No correctness here — Kahoot never reveals it until every player's window has closed.
       socket.emit("live:answer_ack", { questionIndex });
 

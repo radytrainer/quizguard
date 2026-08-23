@@ -15,8 +15,13 @@ export const createLiveSessionSchema = z.object({
 });
 export type CreateLiveSessionInput = z.infer<typeof createLiveSessionSchema>;
 
+// guestName/guestToken are only used by an unauthenticated ("anyone with the code", no account)
+// join — a logged-in student or host is identified from their session cookie instead, and the
+// realtime server ignores these two fields for them. See live.service.ts's joinSessionAsGuest.
 export const liveJoinSchema = z.object({
   sessionId: z.string().uuid(),
+  guestName: z.string().trim().min(1).max(40).optional(),
+  guestToken: z.string().uuid().optional(),
 });
 export type LiveJoinInput = z.infer<typeof liveJoinSchema>;
 
@@ -54,7 +59,8 @@ export interface LiveQuestionView {
 
 export interface LiveRosterEntry {
   participantId: string;
-  studentId: string;
+  // null for a guest ("anyone with the code", no account) participant.
+  studentId: string | null;
   name: string;
 }
 

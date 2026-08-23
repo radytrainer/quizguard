@@ -192,6 +192,7 @@ export async function getSessionByJoinCode(joinCode: string): Promise<{
 export async function joinSession(
   sessionId: string,
   studentId: string,
+  studentName: string,
 ): Promise<LiveSessionParticipant> {
   const session = await requireSession(sessionId);
   if (session.status === "finished" || session.status === "cancelled") {
@@ -216,7 +217,7 @@ export async function joinSession(
 
   await db
     .insert(liveSessionParticipants)
-    .values({ sessionId, studentId })
+    .values({ sessionId, studentId, displayName: studentName })
     .onConflictDoNothing({
       target: [
         liveSessionParticipants.sessionId,
@@ -237,17 +238,62 @@ export async function joinSession(
   return participant;
 }
 
+const GUEST_NAME_MAX_LENGTH = 40;
+
+/** The "anyone with the code" no-account path (Section: Kahoot-style guest play) — identified
+ * only by a token the client generates once and holds for the tab's lifetime (never a real
+ * account), so there's nothing durable to look up afterwards beyond this session's own
+ * leaderboard. Blocked outright for a class-restricted session: guest can't be checked against
+ * `classStudents` the way an enrolled student can. */
+export async function joinSessionAsGuest(
+  sessionId: string,
+  guestToken: string,
+  guestName: string,
+): Promise<LiveSessionParticipant> {
+  const session = await requireSession(sessionId);
+  if (session.status === "finished" || session.status === "cancelled") {
+    throw conflict("This game has already ended");
+  }
+  if (session.classId) {
+    throw forbidden("This game requires a student account to join");
+  }
+
+  const displayName = guestName.trim().slice(0, GUEST_NAME_MAX_LENGTH);
+  if (!displayName) throw conflict("Enter a name to join");
+
+  await db
+    .insert(liveSessionParticipants)
+    .values({ sessionId, guestToken, displayName })
+    .onConflictDoNothing({
+      target: [
+        liveSessionParticipants.sessionId,
+        liveSessionParticipants.guestToken,
+      ],
+    });
+
+  const [participant] = await db
+    .select()
+    .from(liveSessionParticipants)
+    .where(
+      and(
+        eq(liveSessionParticipants.sessionId, sessionId),
+        eq(liveSessionParticipants.guestToken, guestToken),
+      ),
+    )
+    .limit(1);
+  return participant;
+}
+
 export async function getRoster(sessionId: string): Promise<LiveRosterEntry[]> {
   return db
     .select({
       participantId: liveSessionParticipants.id,
       studentId: liveSessionParticipants.studentId,
-      name: users.name,
+      name: liveSessionParticipants.displayName,
     })
     .from(liveSessionParticipants)
-    .innerJoin(users, eq(users.id, liveSessionParticipants.studentId))
     .where(eq(liveSessionParticipants.sessionId, sessionId))
-    .orderBy(users.name);
+    .orderBy(liveSessionParticipants.displayName);
 }
 
 export async function startSession(
@@ -275,7 +321,7 @@ export async function startSession(
 
 export async function submitAnswer(
   sessionId: string,
-  studentId: string,
+  participantId: string,
   questionIndex: number,
   selectedOptionIds: string[],
 ): Promise<void> {
@@ -287,13 +333,16 @@ export async function submitAnswer(
     throw conflict("This question is no longer active");
   }
 
+  // Keyed by participantId (known since `live:join` succeeded, whichever path it came from)
+  // rather than re-deriving it from a studentId — the one thing a guest participant doesn't
+  // have — so this works identically for an authenticated student and a guest.
   const [participant] = await db
     .select()
     .from(liveSessionParticipants)
     .where(
       and(
+        eq(liveSessionParticipants.id, participantId),
         eq(liveSessionParticipants.sessionId, sessionId),
-        eq(liveSessionParticipants.studentId, studentId),
       ),
     )
     .limit(1);
@@ -454,11 +503,10 @@ async function rankedParticipants(sessionId: string) {
   return db
     .select({
       participantId: liveSessionParticipants.id,
-      name: users.name,
+      name: liveSessionParticipants.displayName,
       score: liveSessionParticipants.score,
     })
     .from(liveSessionParticipants)
-    .innerJoin(users, eq(users.id, liveSessionParticipants.studentId))
     .where(eq(liveSessionParticipants.sessionId, sessionId))
     .orderBy(desc(liveSessionParticipants.score));
 }
@@ -535,7 +583,7 @@ export async function advanceQuestion(
 
 export async function getSessionState(
   sessionId: string,
-  studentId: string,
+  participantId: string,
 ): Promise<LiveStateSync> {
   const session = await requireSession(sessionId);
   const [quiz] = await db
@@ -556,7 +604,7 @@ export async function getSessionState(
     .where(
       and(
         eq(liveSessionParticipants.sessionId, sessionId),
-        eq(liveSessionParticipants.studentId, studentId),
+        eq(liveSessionParticipants.id, participantId),
       ),
     )
     .limit(1);
