@@ -420,15 +420,15 @@ export function LiveMonitor({
                   No students match &quot;{presentSearch}&quot;.
                 </p>
               )}
-              <div className="flex max-h-72 flex-col gap-2 overflow-y-auto">
+              <div className="flex max-h-72 flex-wrap gap-1.5 overflow-y-auto">
                 {visiblePresent.map((entry) => (
                   <button
                     key={entry.attemptId}
                     type="button"
                     onClick={() => setStoryAttemptId(entry.attemptId)}
-                    className="border-border hover:bg-secondary/50 flex items-center gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors"
+                    className="border-border hover:bg-secondary/50 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-left text-xs transition-colors"
                   >
-                    <span className="bg-success inline-block size-2 shrink-0 rounded-full" />
+                    <span className="bg-success inline-block size-1.5 shrink-0 rounded-full" />
                     {entry.studentName}
                   </button>
                 ))}
