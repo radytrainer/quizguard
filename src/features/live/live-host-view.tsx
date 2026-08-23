@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type {
@@ -180,59 +179,77 @@ export function LiveHostView({
       )}
 
       {phase === "lobby" && (
-        <div className="border-border bg-card flex flex-col items-center gap-6 rounded-2xl border p-10 text-center">
-          <div>
-            <p className="text-muted-foreground text-sm tracking-wide uppercase">
-              Join code
-            </p>
-            <div className="flex items-center justify-center gap-2">
-              <p className="font-mono text-6xl font-bold tracking-widest">
-                {joinCode}
-              </p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => void handleCopyCode()}
-                aria-label="Copy join code"
-              >
-                {copied ? (
-                  <Check className="text-success size-5" />
-                ) : (
-                  <Copy className="size-5" />
-                )}
-              </Button>
-            </div>
-          </div>
-          {origin && (
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-fit rounded-xl border bg-white p-3">
-                <QRCodeSVG value={`${origin}/play/${sessionId}`} size={160} />
+        <div className="border-border bg-card flex flex-col gap-6 rounded-2xl border p-6 sm:p-8">
+          <div className="sm:divide-border grid grid-cols-1 gap-6 sm:grid-cols-2 sm:divide-x">
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div>
+                <p className="text-muted-foreground text-sm tracking-wide uppercase">
+                  Join code
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <p className="font-mono text-5xl font-bold tracking-widest">
+                    {joinCode}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => void handleCopyCode()}
+                    aria-label="Copy join code"
+                  >
+                    {copied ? (
+                      <Check className="text-success size-5" />
+                    ) : (
+                      <Copy className="size-5" />
+                    )}
+                  </Button>
+                </div>
               </div>
-              <p className="text-muted-foreground text-xs">
-                Scan to join — no account needed
-              </p>
-              <p className="text-muted-foreground text-xs">
-                or go to <span className="font-medium">{origin}/play</span> and
-                enter the code
-              </p>
+
+              <div className="flex w-full flex-col items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Users className="text-muted-foreground size-4" />
+                  <span className="font-semibold">{roster.length} joined</span>
+                </div>
+                {roster.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    Waiting for students to join…
+                  </p>
+                ) : (
+                  <div className="flex max-h-28 w-full flex-wrap justify-center gap-1.5 overflow-y-auto">
+                    {roster.map((r) => (
+                      <span
+                        key={r.participantId}
+                        className="border-border bg-secondary/50 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
+                      >
+                        <span className="bg-success inline-block size-1.5 shrink-0 rounded-full" />
+                        {r.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-          <div className="flex items-center gap-2">
-            <Users className="text-muted-foreground size-5" />
-            <span className="text-lg font-semibold">
-              {roster.length} joined
-            </span>
+
+            {origin && (
+              <div className="flex flex-col items-center justify-center gap-2 pt-2 text-center sm:pt-0">
+                <div className="w-fit rounded-xl border bg-white p-2.5">
+                  <QRCodeSVG value={`${origin}/play/${sessionId}`} size={132} />
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Scan to join — no account needed
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  or go to <span className="font-medium">{origin}/play</span>{" "}
+                  and enter the code
+                </p>
+              </div>
+            )}
           </div>
-          <div className="flex max-h-40 w-full flex-wrap justify-center gap-2 overflow-y-auto">
-            {roster.map((r) => (
-              <Badge key={r.participantId} variant="secondary">
-                {r.name}
-              </Badge>
-            ))}
-          </div>
+
           <Button
             size="lg"
+            className="self-center"
             onClick={() => act("live:host_start")}
             disabled={roster.length === 0}
           >
