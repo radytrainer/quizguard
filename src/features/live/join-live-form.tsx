@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Radio } from "lucide-react";
 
@@ -14,27 +14,49 @@ async function readErrorMessage(res: Response, fallback: string) {
   return body?.error?.message ?? fallback;
 }
 
-export function JoinLiveForm() {
+export function JoinLiveForm({ initialCode }: { initialCode?: string }) {
   const router = useRouter();
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(initialCode ?? "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Guards the QR-scan auto-join below so it only ever fires once per page load, not on every
+  // re-render — the effect's own dependency (`code`) would otherwise re-trigger it if the user
+  // edited the field after a failed attempt.
+  const autoJoinedRef = useRef(false);
+
+  const joinWithCode = useCallback(
+    async (value: string) => {
+      setSubmitting(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/live/by-code/${value.trim()}`);
+        if (!res.ok) {
+          setError(
+            await readErrorMessage(res, "No active game with that code."),
+          );
+          return;
+        }
+        const data = (await res.json()) as { sessionId: string };
+        router.push(`/student/live/${data.sessionId}`);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [router],
+  );
+
+  // A code arriving via the host's QR link (features/live/live-host-view.tsx) means the student
+  // already scanned to get here — joining automatically saves them re-typing what's already
+  // filled in, matching how scanning a QR code to join normally behaves.
+  useEffect(() => {
+    if (!initialCode || autoJoinedRef.current) return;
+    autoJoinedRef.current = true;
+    void joinWithCode(initialCode);
+  }, [initialCode, joinWithCode]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/live/by-code/${code.trim()}`);
-      if (!res.ok) {
-        setError(await readErrorMessage(res, "No active game with that code."));
-        return;
-      }
-      const data = (await res.json()) as { sessionId: string };
-      router.push(`/student/live/${data.sessionId}`);
-    } finally {
-      setSubmitting(false);
-    }
+    await joinWithCode(code);
   }
 
   return (

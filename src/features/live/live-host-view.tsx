@@ -6,11 +6,14 @@ import {
   ArrowRight,
   Award,
   BarChart3,
+  Check,
   CheckCircle2,
+  Copy,
   Radio,
   Users,
   XCircle,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +51,13 @@ export function LiveHostView({
   const [standings, setStandings] = useState<LiveLeaderboardEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [copied, setCopied] = useState(false);
+  // Lazy initializer (not a plain `window.location.origin` read, and not an effect) so this
+  // never touches `window` during the server render, same pattern as
+  // features/attempts/exam-attempt.tsx's `useFlaggedQuestions`.
+  const [origin] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.origin,
+  );
 
   useEffect(() => {
     const socket = getRealtimeSocket();
@@ -132,6 +142,17 @@ export function LiveHostView({
     getRealtimeSocket().emit(event, { sessionId });
   }
 
+  async function handleCopyCode() {
+    try {
+      await navigator.clipboard.writeText(joinCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard access can be denied (no permission, insecure context) — the code is still
+      // right there on screen to copy by hand.
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <div className="flex items-center justify-between gap-4">
@@ -162,10 +183,38 @@ export function LiveHostView({
             <p className="text-muted-foreground text-sm tracking-wide uppercase">
               Join code
             </p>
-            <p className="font-mono text-6xl font-bold tracking-widest">
-              {joinCode}
-            </p>
+            <div className="flex items-center justify-center gap-2">
+              <p className="font-mono text-6xl font-bold tracking-widest">
+                {joinCode}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => void handleCopyCode()}
+                aria-label="Copy join code"
+              >
+                {copied ? (
+                  <Check className="text-success size-5" />
+                ) : (
+                  <Copy className="size-5" />
+                )}
+              </Button>
+            </div>
           </div>
+          {origin && (
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-fit rounded-xl border bg-white p-3">
+                <QRCodeSVG
+                  value={`${origin}/student?code=${joinCode}`}
+                  size={160}
+                />
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Scan to join with this code
+              </p>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <Users className="text-muted-foreground size-5" />
             <span className="text-lg font-semibold">

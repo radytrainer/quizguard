@@ -62,15 +62,20 @@ function StatCard({
   );
 }
 
-export default async function StudentPage() {
+export default async function StudentPage({
+  searchParams,
+}: PageProps<"/student">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.role !== "student") redirect("/dashboard");
 
-  const [assignments, history] = await Promise.all([
+  const [assignments, history, resolvedSearchParams] = await Promise.all([
     listAssignmentsForStudent(user.id),
     listAttemptHistory(user.id),
+    searchParams,
   ]);
+  const codeParam = resolvedSearchParams.code;
+  const joinCode = Array.isArray(codeParam) ? codeParam[0] : codeParam;
 
   const inProgressByQuiz = new Map(
     history
@@ -94,7 +99,7 @@ export default async function StudentPage() {
         <LogoutButton />
       </div>
 
-      <JoinLiveForm />
+      <JoinLiveForm initialCode={joinCode} />
 
       <div className="grid grid-cols-3 gap-3 sm:gap-4">
         <StatCard
