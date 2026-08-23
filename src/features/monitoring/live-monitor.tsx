@@ -157,6 +157,17 @@ function parseTimeToMinutes(value: string): number | null {
   return hours * 60 + minutes;
 }
 
+// `Date#toISOString` reports UTC, which would shift an event's date across midnight in most
+// local time zones — this builds the same "YYYY-MM-DD" input[type=date] uses, but from local
+// fields, so a date the export filter compares against actually matches the day the event
+// happened in the browser's own time zone.
+function toLocalDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function LiveMonitor({
   quizId,
   quizTitle,
@@ -174,6 +185,8 @@ export function LiveMonitor({
   const [eventSearch, setEventSearch] = useState("");
   const [attempts, setAttempts] = useState<LiveAttempt[]>(initialAttempts);
   const [storyAttemptId, setStoryAttemptId] = useState<string | null>(null);
+  const [activityQuizName, setActivityQuizName] = useState(quizTitle);
+  const [activityDate, setActivityDate] = useState("");
   const [activityFrom, setActivityFrom] = useState("");
   const [activityTo, setActivityTo] = useState("");
 
@@ -338,10 +351,14 @@ export function LiveMonitor({
   function handleExportActivityPdf() {
     const fromMinutes = parseTimeToMinutes(activityFrom);
     const toMinutes = parseTimeToMinutes(activityTo);
+    const reportTitle = activityQuizName.trim() || quizTitle;
 
     const inRange = events.filter((event) => {
-      if (fromMinutes === null && toMinutes === null) return true;
       const occurred = new Date(event.occurredAt);
+      if (activityDate && toLocalDateInputValue(occurred) !== activityDate) {
+        return false;
+      }
+      if (fromMinutes === null && toMinutes === null) return true;
       const minutes = occurred.getHours() * 60 + occurred.getMinutes();
       if (fromMinutes !== null && minutes < fromMinutes) return false;
       if (toMinutes !== null && minutes > toMinutes) return false;
@@ -352,10 +369,19 @@ export function LiveMonitor({
         new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
     );
 
-    const rangeLabel =
+    const dateLabel = activityDate
+      ? new Date(`${activityDate}T00:00:00`).toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : null;
+    const timeLabel =
       fromMinutes === null && toMinutes === null
-        ? "All activity"
+        ? null
         : `${activityFrom || "start"} – ${activityTo || "end"}`;
+    const rangeLabel =
+      [dateLabel, timeLabel].filter(Boolean).join(" · ") || "All activity";
 
     const rows = sorted
       .map(
@@ -371,7 +397,7 @@ export function LiveMonitor({
 <html>
 <head>
 <meta charset="utf-8" />
-<title>${escapeHtml(quizTitle)} — Activity Report</title>
+<title>${escapeHtml(reportTitle)} — Activity Report</title>
 <style>
   body { font-family: Georgia, "Times New Roman", serif; color: #1a1a1a; margin: 2.5rem; }
   h1 { font-size: 1.4rem; margin: 0 0 0.2rem; }
@@ -384,7 +410,7 @@ export function LiveMonitor({
 </style>
 </head>
 <body>
-  <h1>${escapeHtml(quizTitle)}</h1>
+  <h1>${escapeHtml(reportTitle)}</h1>
   <p class="meta">
     Live Activity Report &middot; Range: ${escapeHtml(rangeLabel)} &middot;
     Generated ${escapeHtml(new Date().toLocaleString())} &middot;
@@ -580,6 +606,35 @@ export function LiveMonitor({
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
               <div className="flex flex-wrap items-end gap-2">
+                <div className="flex min-w-40 flex-1 flex-col gap-1">
+                  <label
+                    htmlFor="activity-export-quiz"
+                    className="text-muted-foreground text-[10px]"
+                  >
+                    Quiz name
+                  </label>
+                  <Input
+                    id="activity-export-quiz"
+                    className="h-8 text-sm"
+                    value={activityQuizName}
+                    onChange={(e) => setActivityQuizName(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="activity-export-date"
+                    className="text-muted-foreground text-[10px]"
+                  >
+                    Date
+                  </label>
+                  <Input
+                    id="activity-export-date"
+                    type="date"
+                    className="h-8 w-40 text-sm"
+                    value={activityDate}
+                    onChange={(e) => setActivityDate(e.target.value)}
+                  />
+                </div>
                 <div className="flex flex-col gap-1">
                   <label
                     htmlFor="activity-export-from"
@@ -590,7 +645,7 @@ export function LiveMonitor({
                   <Input
                     id="activity-export-from"
                     type="time"
-                    className="h-8 w-28 text-sm"
+                    className="h-8 w-36 text-sm"
                     value={activityFrom}
                     onChange={(e) => setActivityFrom(e.target.value)}
                   />
@@ -605,7 +660,7 @@ export function LiveMonitor({
                   <Input
                     id="activity-export-to"
                     type="time"
-                    className="h-8 w-28 text-sm"
+                    className="h-8 w-36 text-sm"
                     value={activityTo}
                     onChange={(e) => setActivityTo(e.target.value)}
                   />
