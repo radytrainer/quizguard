@@ -552,6 +552,18 @@ export async function cancelSession(sessionId: string): Promise<void> {
     .where(eq(liveSessions.id, sessionId));
 }
 
+/** Removes a game from the host's Live Games list entirely (Section: "should have a place to
+ * remove" once a game's ended) — only once it's actually over, so an active game can't be
+ * deleted out from under whoever's still playing it. Participants/answers cascade with it
+ * (live_session_participants/live_session_answers' own FKs), nothing to clean up separately. */
+export async function deleteSession(sessionId: string): Promise<void> {
+  const session = await requireSession(sessionId);
+  if (session.status !== "finished" && session.status !== "cancelled") {
+    throw conflict("End the game before removing it");
+  }
+  await db.delete(liveSessions).where(eq(liveSessions.id, sessionId));
+}
+
 export async function advanceQuestion(
   sessionId: string,
 ): Promise<
