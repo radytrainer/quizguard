@@ -18,6 +18,7 @@ import { conflict, notFound } from "@/lib/api-response";
 import { db } from "@/lib/db";
 import {
   classStudents,
+  examAttempts,
   questions,
   quizAssignments,
   quizQuestions,
@@ -53,6 +54,10 @@ export function toDisplayStatus(quiz: {
 export interface QuizListItem extends QuizWithPoolInfo {
   displayStatus: QuizDisplayStatus;
   studentCount: number;
+  // Distinct students with at least one exam attempt (any status) — "assigned" (studentCount)
+  // only says who *can* take it, this says who actually has, at a glance from the list page
+  // without opening Attempts.
+  joinedCount: number;
 }
 
 export interface QuizListResult {
@@ -339,6 +344,28 @@ async function studentCountsByQuiz(
   );
 }
 
+/** Distinct students who've actually started an attempt (in progress or finished, any
+ * status) — unlike studentCountsByQuiz above, this only reads exam_attempts, so it's a single
+ * grouped aggregate rather than a union of two sources. */
+async function joinedCountsByQuiz(
+  quizIds: string[],
+): Promise<Map<string, number>> {
+  if (quizIds.length === 0) return new Map();
+
+  const rows = await db
+    .select({
+      quizId: examAttempts.quizId,
+      joined: sql<number>`count(distinct ${examAttempts.studentId})`.mapWith(
+        Number,
+      ),
+    })
+    .from(examAttempts)
+    .where(inArray(examAttempts.quizId, quizIds))
+    .groupBy(examAttempts.quizId);
+
+  return new Map(rows.map((row) => [row.quizId, row.joined]));
+}
+
 export async function listQuizzes(
   query: QuizListQuery,
 ): Promise<QuizListResult> {
@@ -418,11 +445,16 @@ export async function listQuizzes(
     .limit(query.pageSize)
     .offset((query.page - 1) * query.pageSize);
 
-  const studentCounts = await studentCountsByQuiz(rows.map((r) => r.id));
+  const quizIds = rows.map((r) => r.id);
+  const [studentCounts, joinedCounts] = await Promise.all([
+    studentCountsByQuiz(quizIds),
+    joinedCountsByQuiz(quizIds),
+  ]);
   const items: QuizListItem[] = rows.map((row) => ({
     ...row,
     displayStatus: toDisplayStatus(row),
     studentCount: studentCounts.get(row.id) ?? 0,
+    joinedCount: joinedCounts.get(row.id) ?? 0,
   }));
 
   return { items, total, page: query.page, pageSize: query.pageSize };

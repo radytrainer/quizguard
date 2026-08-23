@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Archive,
+  BarChart3,
   CalendarClock,
   Clock,
   Copy,
@@ -49,6 +50,7 @@ interface QuizListItem {
   questionsPerAttempt: number;
   questionCount: number;
   studentCount: number;
+  joinedCount: number;
   startAt: string | null;
   endAt: string | null;
 }
@@ -391,9 +393,11 @@ export function QuizList() {
                       Publish
                     </DropdownMenuItem>
                   )}
-                  {quiz.displayStatus === "scheduled" && (
+                  {(quiz.displayStatus === "scheduled" ||
+                    quiz.displayStatus === "published") && (
                     <DropdownMenuItem asChild>
                       <Link href={`/teacher/quizzes/${quiz.id}/edit`}>
+                        <FileEdit />
                         Edit
                       </Link>
                     </DropdownMenuItem>
@@ -498,8 +502,8 @@ export function QuizList() {
               />
               <StatItem
                 icon={Users}
-                label="Students"
-                value={quiz.studentCount}
+                label="Joined"
+                value={`${quiz.joinedCount}/${quiz.studentCount}`}
               />
             </div>
 
@@ -518,44 +522,34 @@ export function QuizList() {
                 </Button>
               )}
               {quiz.displayStatus === "published" && (
-                <>
-                  <Button size="sm" className="w-full" asChild>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button size="sm" asChild>
                     <Link
                       href={`/teacher/quizzes/${quiz.id}/preview#assignments`}
                     >
                       <UserPlus className="size-3.5" />
-                      Assign to Students
+                      Assign
                     </Link>
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="w-full"
-                    asChild
-                  >
+                  <Button size="sm" variant="secondary" asChild>
                     <Link href={`/teacher/quizzes/${quiz.id}/host`}>
                       <Radio className="size-3.5" />
-                      Host Live Game
+                      Host Live
                     </Link>
                   </Button>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Button size="sm" variant="secondary" asChild>
-                      <Link href={`/teacher/quizzes/${quiz.id}/edit`}>
-                        Edit
-                      </Link>
-                    </Button>
-                    <Button size="sm" variant="secondary" asChild>
-                      <Link href={`/teacher/quizzes/${quiz.id}/attempts`}>
-                        Attempts
-                      </Link>
-                    </Button>
-                    <Button size="sm" variant="secondary" asChild>
-                      <Link href={`/teacher/quizzes/${quiz.id}/results`}>
-                        Results
-                      </Link>
-                    </Button>
-                  </div>
-                </>
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={`/teacher/quizzes/${quiz.id}/attempts`}>
+                      <ListChecks className="size-3.5" />
+                      Attempts
+                    </Link>
+                  </Button>
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={`/teacher/quizzes/${quiz.id}/results`}>
+                      <BarChart3 className="size-3.5" />
+                      Results
+                    </Link>
+                  </Button>
+                </div>
               )}
               {quiz.displayStatus === "scheduled" && (
                 <>
