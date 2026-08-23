@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Award,
@@ -33,7 +33,8 @@ type Phase =
   | "reveal"
   | "leaderboard"
   | "finished"
-  | "cancelled";
+  | "cancelled"
+  | "join_failed";
 
 export function LivePlayerView({
   sessionId,
@@ -79,10 +80,20 @@ export function LivePlayerView({
     }
   });
 
+  // Distinguishes "the join itself failed" (e.g. the game already ended — never gets a
+  // live:state_sync at all) from a transient in-game error (submitting after the window
+  // closed) — only the former should replace the whole screen instead of just showing an
+  // inline banner over whatever phase we're already in.
+  const hasJoinedRef = useRef(false);
+
   useEffect(() => {
     const socket = getRealtimeSocket();
 
     function join() {
+      // Reset on every attempt (not just once per effect) — a reconnect re-emits `live:join`
+      // too, and that retry can fail on its own (the game ended while we were disconnected),
+      // which should be treated the same as a first-attempt failure.
+      hasJoinedRef.current = false;
       socket.emit(
         "live:join",
         guestName && guestToken
@@ -91,6 +102,7 @@ export function LivePlayerView({
       );
     }
     function onStateSync(state: LiveStateSync) {
+      hasJoinedRef.current = true;
       setQuizTitle(state.quizTitle);
       setTotalScore(state.score);
       if (state.status === "lobby") {
@@ -142,6 +154,7 @@ export function LivePlayerView({
     }
     function onErrorEvent(message: string) {
       setError(message);
+      if (!hasJoinedRef.current) setPhase("join_failed");
     }
 
     if (socket.connected) join();
@@ -233,10 +246,22 @@ export function LivePlayerView({
         </div>
       </div>
 
-      {error && (
+      {error && phase !== "join_failed" && (
         <p role="alert" className="text-destructive text-sm">
           {error}
         </p>
+      )}
+
+      {phase === "join_failed" && (
+        <div className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center">
+          <XCircle className="text-muted-foreground size-10" />
+          <p className="font-medium">{error ?? "Couldn't join this game."}</p>
+          <Button asChild variant="secondary">
+            <Link href={guestName ? "/play" : "/student"}>
+              {guestName ? "Play another game" : "Back to Dashboard"}
+            </Link>
+          </Button>
+        </div>
       )}
 
       {(phase === "connecting" || phase === "waiting") && (
