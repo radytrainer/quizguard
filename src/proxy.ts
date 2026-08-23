@@ -76,7 +76,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (pathname === "/login" && hasSession) {
+  if ((pathname === "/login" || pathname === "/register") && hasSession) {
     // Optimistic only: we don't know the role from the cookie alone, so send them to a
     // neutral page that resolves the correct destination with an authoritative check.
     return NextResponse.redirect(new URL("/dashboard", request.url));

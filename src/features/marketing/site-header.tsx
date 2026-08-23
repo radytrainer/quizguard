@@ -4,14 +4,23 @@ import { ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AuthUser } from "@/backend/auth/session";
 
+// "Features" is an absolute "/#features" (not a bare "#features") because SiteHeader is shared
+// across pages (the homepage and /pricing) — a bare hash resolves against whatever page you're
+// already on, so clicking it from /pricing produced "/pricing#features", a section that only
+// exists on the homepage. "/#features" always targets the homepage's section regardless of
+// which page the header is currently rendered on.
 const navLinks = [
-  { href: "#features", label: "Features" },
+  { href: "/#features", label: "Features" },
   { href: "#", label: "Solutions" },
   { href: "/pricing", label: "Pricing" },
 ];
 
 export function SiteHeader({ user }: { user: AuthUser | null }) {
   const signedInHref = user ? "/dashboard" : "/login";
+  // "Get Started" is the sign-up CTA, distinct from "Sign In" — self-registration is
+  // teacher-only right now (auth.schema.ts's registerSchema), so this always lands there for a
+  // logged-out visitor regardless of whether they end up being a teacher, student, or admin.
+  const getStartedHref = user ? "/dashboard" : "/register";
 
   return (
     <header className="border-border/60 bg-background/80 sticky top-0 z-40 border-b backdrop-blur-sm">
@@ -40,7 +49,7 @@ export function SiteHeader({ user }: { user: AuthUser | null }) {
             </Button>
           )}
           <Button asChild>
-            <Link href={signedInHref}>
+            <Link href={getStartedHref}>
               {user ? "Go to Dashboard" : "Get Started"}
             </Link>
           </Button>

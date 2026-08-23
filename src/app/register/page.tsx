@@ -2,17 +2,17 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
 
-import { LoginForm } from "@/features/auth/login-form";
+import { RegisterForm } from "@/features/auth/register-form";
 
-export default async function LoginPage() {
+export default async function RegisterPage() {
   // Forces dynamic rendering — a statically-prerendered page has no per-request nonce to
   // attach to Next's own hydration script, so it can't work with proxy.ts's nonce-based CSP
-  // (Phase 13, docs/ARCHITECTURE.md — Section 16). This was the one static page in the app.
+  // (same reasoning as login/page.tsx, the only other page that needs this).
   await connection();
 
   return (
     // `dark` activates the app's existing (otherwise-unused) dark palette for this one page —
-    // deliberate: a proctoring-session look, not a light-mode toggle.
+    // same treatment as login/page.tsx, for visual consistency between the two auth pages.
     <main className="dark bg-background text-foreground relative flex flex-1 flex-col overflow-hidden">
       <div
         aria-hidden="true"
@@ -50,24 +50,26 @@ export default async function LoginPage() {
 
         <div className="border-border bg-card/80 w-full max-w-sm rounded-2xl border p-8 shadow-2xl backdrop-blur-sm">
           <div className="mb-6 flex flex-col gap-1.5">
-            <h1 className="text-xl font-bold tracking-tight">Welcome back</h1>
+            <h1 className="text-xl font-bold tracking-tight">
+              Create a teacher account
+            </h1>
             <p className="text-muted-foreground text-sm">
-              Sign in with your admin, teacher, or student account.
+              Self-registration is open for teachers only right now — student
+              and admin accounts are added by your school.
             </p>
           </div>
 
-          <LoginForm />
+          <RegisterForm />
         </div>
 
         <p className="text-muted-foreground mt-6 text-center text-xs">
-          Don&apos;t have an account?{" "}
+          Already have an account?{" "}
           <Link
-            href="/register"
+            href="/login"
             className="text-primary font-medium hover:underline"
           >
-            Register as a teacher
+            Sign in
           </Link>
-          , or contact your school administrator for a student account.
         </p>
       </div>
     </main>

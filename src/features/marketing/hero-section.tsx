@@ -7,6 +7,10 @@ import { DashboardPreview } from "@/features/marketing/dashboard-preview";
 
 export function HeroSection({ user }: { user: AuthUser | null }) {
   const ctaHref = user ? "/dashboard" : "/login";
+  // "Create Quiz" is a teacher action — self-registration is teacher-only (auth.schema.ts's
+  // registerSchema), so it can safely send a logged-out visitor to sign up. "Take a Quiz" is a
+  // student action; students can't self-register, so that one keeps going to /login.
+  const createQuizHref = user ? "/dashboard" : "/register";
 
   return (
     <section className="relative overflow-hidden pt-20 pb-16 sm:pt-28 sm:pb-24">
@@ -38,7 +42,7 @@ export function HeroSection({ user }: { user: AuthUser | null }) {
 
           <div className="mt-2 flex flex-col gap-3 sm:flex-row">
             <Button size="lg" asChild>
-              <Link href={ctaHref}>
+              <Link href={createQuizHref}>
                 Create Quiz
                 <ArrowRight className="size-4" />
               </Link>
