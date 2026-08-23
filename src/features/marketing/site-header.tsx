@@ -7,7 +7,7 @@ import type { AuthUser } from "@/backend/auth/session";
 const navLinks = [
   { href: "#features", label: "Features" },
   { href: "#", label: "Solutions" },
-  { href: "#", label: "Pricing" },
+  { href: "/pricing", label: "Pricing" },
 ];
 
 export function SiteHeader({ user }: { user: AuthUser | null }) {

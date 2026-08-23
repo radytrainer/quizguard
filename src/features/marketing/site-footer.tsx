@@ -1,18 +1,34 @@
 import Link from "next/link";
 import { Globe, Mail, ShieldCheck } from "lucide-react";
 
+// Every link defaults to "#" (placeholder — these pages don't exist yet) except Pricing,
+// which now points at the real /pricing page (site-header.tsx's nav link does the same).
 const footerColumns = [
   {
     heading: "Product",
-    links: ["Features", "Security", "Pricing", "Changelog"],
+    links: [
+      { label: "Features", href: "#" },
+      { label: "Security", href: "#" },
+      { label: "Pricing", href: "/pricing" },
+      { label: "Changelog", href: "#" },
+    ],
   },
   {
     heading: "Resources",
-    links: ["Documentation", "Help Center", "API Reference", "Community"],
+    links: [
+      { label: "Documentation", href: "#" },
+      { label: "Help Center", href: "#" },
+      { label: "API Reference", href: "#" },
+      { label: "Community", href: "#" },
+    ],
   },
   {
     heading: "Legal",
-    links: ["Privacy Policy", "Terms of Service", "Cookie Policy"],
+    links: [
+      { label: "Privacy Policy", href: "#" },
+      { label: "Terms of Service", href: "#" },
+      { label: "Cookie Policy", href: "#" },
+    ],
   },
 ];
 
@@ -39,12 +55,12 @@ export function SiteFooter() {
               </p>
               <ul className="mt-3 flex flex-col gap-2.5">
                 {column.links.map((link) => (
-                  <li key={link}>
+                  <li key={link.label}>
                     <Link
-                      href="#"
+                      href={link.href}
                       className="hover:text-foreground text-sm transition-colors"
                     >
-                      {link}
+                      {link.label}
                     </Link>
                   </li>
                 ))}
