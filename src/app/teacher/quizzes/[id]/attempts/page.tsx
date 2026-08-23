@@ -41,6 +41,7 @@ export default async function QuizAttemptsPage({
 
       <LiveMonitor
         quizId={id}
+        quizTitle={quiz.title}
         initialAttempts={attempts}
         initialEvents={history.map((event) => ({
           ...event,

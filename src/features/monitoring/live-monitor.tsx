@@ -7,6 +7,7 @@ import {
   Lock,
   Maximize2,
   Minimize2,
+  Printer,
   Search,
   ShieldAlert,
   Users,
@@ -138,12 +139,32 @@ function severity(count: number): "normal" | "warning" | "flagged" {
 // otherwise have kept.
 const MAX_EVENTS = 200;
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// "8:00 AM" input[type=time] values arrive as "08:00" — converted to minutes-since-midnight so
+// the export filter can compare purely on time-of-day, ignoring which day each event fell on.
+function parseTimeToMinutes(value: string): number | null {
+  if (!value) return null;
+  const [hours, minutes] = value.split(":").map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+  return hours * 60 + minutes;
+}
+
 export function LiveMonitor({
   quizId,
+  quizTitle,
   initialAttempts,
   initialEvents,
 }: {
   quizId: string;
+  quizTitle: string;
   initialAttempts: LiveAttempt[];
   initialEvents: LiveEvent[];
 }) {
@@ -153,6 +174,8 @@ export function LiveMonitor({
   const [eventSearch, setEventSearch] = useState("");
   const [attempts, setAttempts] = useState<LiveAttempt[]>(initialAttempts);
   const [storyAttemptId, setStoryAttemptId] = useState<string | null>(null);
+  const [activityFrom, setActivityFrom] = useState("");
+  const [activityTo, setActivityTo] = useState("");
 
   const liveViewRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -286,6 +309,12 @@ export function LiveMonitor({
       event.studentName.toLowerCase().includes(query),
     );
   }, [events, eventSearch]);
+  // Keyed by attemptId so both the presence chips and the activity feed can show each event's
+  // attempt number / lock state without the socket payloads (PresenceEntry, LiveEvent) needing
+  // to carry that data themselves — `attempts` already tracks it reactively.
+  const attemptsById = useMemo(() => {
+    return new Map(attempts.map((attempt) => [attempt.id, attempt]));
+  }, [attempts]);
 
   // Shared by the attempts table's row action and the story dialog's own unlock button, so both
   // stay in sync with a single source of truth (`attempts`) instead of each independently
@@ -300,6 +329,83 @@ export function LiveMonitor({
     setAttempts((prev) =>
       prev.map((a) => (a.id === attemptId ? { ...a, locked: false } : a)),
     );
+  }
+
+  // Opens a print-ready report in a new tab and hands it straight to the browser's print
+  // dialog — "Save as PDF" there produces the exam-period document without this app needing a
+  // PDF-rendering dependency of its own. Filters purely on time-of-day (not date), matching how
+  // a teacher thinks about an exam window ("8:00 AM – 10:00 AM") regardless of which day it ran.
+  function handleExportActivityPdf() {
+    const fromMinutes = parseTimeToMinutes(activityFrom);
+    const toMinutes = parseTimeToMinutes(activityTo);
+
+    const inRange = events.filter((event) => {
+      if (fromMinutes === null && toMinutes === null) return true;
+      const occurred = new Date(event.occurredAt);
+      const minutes = occurred.getHours() * 60 + occurred.getMinutes();
+      if (fromMinutes !== null && minutes < fromMinutes) return false;
+      if (toMinutes !== null && minutes > toMinutes) return false;
+      return true;
+    });
+    const sorted = [...inRange].sort(
+      (a, b) =>
+        new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
+    );
+
+    const rangeLabel =
+      fromMinutes === null && toMinutes === null
+        ? "All activity"
+        : `${activityFrom || "start"} – ${activityTo || "end"}`;
+
+    const rows = sorted
+      .map(
+        (event) => `<tr>
+          <td>${escapeHtml(new Date(event.occurredAt).toLocaleString())}</td>
+          <td>${escapeHtml(event.studentName)}</td>
+          <td>${escapeHtml(eventVerb(event))}</td>
+        </tr>`,
+      )
+      .join("");
+
+    const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>${escapeHtml(quizTitle)} — Activity Report</title>
+<style>
+  body { font-family: Georgia, "Times New Roman", serif; color: #1a1a1a; margin: 2.5rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.2rem; }
+  .meta { color: #555; font-size: 0.85rem; margin-bottom: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
+  th { background: #f2f2f2; }
+  tr:nth-child(even) { background: #fafafa; }
+  @media print { body { margin: 1.2cm; } }
+</style>
+</head>
+<body>
+  <h1>${escapeHtml(quizTitle)}</h1>
+  <p class="meta">
+    Live Activity Report &middot; Range: ${escapeHtml(rangeLabel)} &middot;
+    Generated ${escapeHtml(new Date().toLocaleString())} &middot;
+    ${sorted.length} event${sorted.length === 1 ? "" : "s"}
+  </p>
+  <table>
+    <thead><tr><th>Time</th><th>Student</th><th>Event</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="3">No activity in this range.</td></tr>`}</tbody>
+  </table>
+</body>
+</html>`;
+
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) {
+      alert("Allow pop-ups for this site to export the activity report.");
+      return;
+    }
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
   }
 
   return (
@@ -420,18 +526,46 @@ export function LiveMonitor({
                   No students match &quot;{presentSearch}&quot;.
                 </p>
               )}
-              <div className="flex max-h-72 flex-wrap gap-1.5 overflow-y-auto">
-                {visiblePresent.map((entry) => (
-                  <button
-                    key={entry.attemptId}
-                    type="button"
-                    onClick={() => setStoryAttemptId(entry.attemptId)}
-                    className="border-border hover:bg-secondary/50 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-left text-xs transition-colors"
-                  >
-                    <span className="bg-success inline-block size-1.5 shrink-0 rounded-full" />
-                    {entry.studentName}
-                  </button>
-                ))}
+              <div
+                className={cn(
+                  "flex flex-wrap gap-1.5 overflow-x-hidden overflow-y-auto",
+                  isFullscreen ? "max-h-[70vh]" : "max-h-72",
+                )}
+              >
+                {visiblePresent.map((entry) => {
+                  const attempt = attemptsById.get(entry.attemptId);
+                  const locked = attempt?.locked ?? false;
+                  return (
+                    <button
+                      key={entry.attemptId}
+                      type="button"
+                      onClick={() => setStoryAttemptId(entry.attemptId)}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-left text-xs transition-colors",
+                        locked
+                          ? LOCKED_BADGE_CLASSNAME
+                          : "border-border hover:bg-secondary/50",
+                      )}
+                    >
+                      {locked ? (
+                        <Lock className="size-3 shrink-0" />
+                      ) : (
+                        <span className="bg-success inline-block size-1.5 shrink-0 rounded-full" />
+                      )}
+                      <span>{entry.studentName}</span>
+                      {attempt?.attemptNumber !== undefined && (
+                        <span
+                          className={cn(
+                            "text-[10px]",
+                            locked ? "opacity-80" : "text-muted-foreground",
+                          )}
+                        >
+                          #{attempt.attemptNumber}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -445,6 +579,47 @@ export function LiveMonitor({
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="activity-export-from"
+                    className="text-muted-foreground text-[10px]"
+                  >
+                    From
+                  </label>
+                  <Input
+                    id="activity-export-from"
+                    type="time"
+                    className="h-8 w-28 text-sm"
+                    value={activityFrom}
+                    onChange={(e) => setActivityFrom(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="activity-export-to"
+                    className="text-muted-foreground text-[10px]"
+                  >
+                    To
+                  </label>
+                  <Input
+                    id="activity-export-to"
+                    type="time"
+                    className="h-8 w-28 text-sm"
+                    value={activityTo}
+                    onChange={(e) => setActivityTo(e.target.value)}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={handleExportActivityPdf}
+                >
+                  <Printer className="size-4" />
+                  Export PDF
+                </Button>
+              </div>
               {events.length > 5 && (
                 <div className="relative mb-1">
                   <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
@@ -467,28 +642,46 @@ export function LiveMonitor({
                   No activity matches &quot;{eventSearch}&quot;.
                 </p>
               )}
-              <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
-                {visibleEvents.map((event, index) => (
-                  <button
-                    key={`${event.attemptId}-${event.occurredAt}-${index}`}
-                    type="button"
-                    onClick={() => setStoryAttemptId(event.attemptId)}
-                    className="hover:bg-secondary/50 -mx-1 flex items-center gap-2 rounded-md px-1 py-1 text-left text-sm transition-colors"
-                  >
-                    <Badge
-                      variant="outline"
-                      className={cn("shrink-0", eventBadgeClassName(event))}
+              <div
+                className={cn(
+                  "flex flex-col gap-2 overflow-x-hidden overflow-y-auto",
+                  isFullscreen ? "max-h-[70vh]" : "max-h-80",
+                )}
+              >
+                {visibleEvents.map((event, index) => {
+                  const attempt = attemptsById.get(event.attemptId);
+                  return (
+                    <button
+                      key={`${event.attemptId}-${event.occurredAt}-${index}`}
+                      type="button"
+                      onClick={() => setStoryAttemptId(event.attemptId)}
+                      className="hover:bg-secondary/50 -mx-1 flex items-center gap-2 rounded-md px-1 py-1 text-left text-sm transition-colors"
                     >
-                      {event.studentName}
-                    </Badge>
-                    <span className="text-muted-foreground flex-1 truncate">
-                      {eventVerb(event)}
-                    </span>
-                    <Badge variant="outline" className="shrink-0 text-xs">
-                      {new Date(event.occurredAt).toLocaleTimeString()}
-                    </Badge>
-                  </button>
-                ))}
+                      <Badge
+                        variant="outline"
+                        className={cn("shrink-0", eventBadgeClassName(event))}
+                      >
+                        {event.studentName}
+                      </Badge>
+                      {isFullscreen && attempt?.attemptNumber !== undefined && (
+                        <Badge
+                          variant="outline"
+                          className="text-muted-foreground shrink-0 text-[10px]"
+                        >
+                          Attempt #{attempt.attemptNumber}
+                        </Badge>
+                      )}
+                      <span className="text-muted-foreground min-w-0 flex-1 truncate">
+                        {eventVerb(event)}
+                      </span>
+                      <Badge variant="outline" className="shrink-0 text-xs">
+                        {isFullscreen
+                          ? new Date(event.occurredAt).toLocaleString()
+                          : new Date(event.occurredAt).toLocaleTimeString()}
+                      </Badge>
+                    </button>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
