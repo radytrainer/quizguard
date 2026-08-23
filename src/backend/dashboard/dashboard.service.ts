@@ -8,6 +8,7 @@ import {
   classes,
   examAttempts,
   examViolations,
+  liveSessions,
   quizAssignments,
   quizzes,
   users,
@@ -60,6 +61,48 @@ function weekStart(date: Date): Date {
   );
   start.setUTCDate(start.getUTCDate() - diffToMonday);
   return start;
+}
+
+export interface TeacherActivityStatus {
+  examActive: boolean;
+  liveActive: boolean;
+}
+
+/** Backs the sidebar's "something's happening right now" indicator (teacher-sidebar.tsx),
+ * which polls this every ~20s — deliberately just two cheap existence checks, not the full
+ * getTeacherDashboard computation below, which does far more work than a frequent poll should
+ * ever trigger. */
+export async function getTeacherActivityStatus(
+  teacherId: string,
+): Promise<TeacherActivityStatus> {
+  const [examRow, liveRow] = await Promise.all([
+    db
+      .select({ id: examAttempts.id })
+      .from(examAttempts)
+      .innerJoin(quizzes, eq(quizzes.id, examAttempts.quizId))
+      .where(
+        and(
+          eq(quizzes.createdBy, teacherId),
+          eq(examAttempts.status, "in_progress"),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ id: liveSessions.id })
+      .from(liveSessions)
+      .where(
+        and(
+          eq(liveSessions.hostId, teacherId),
+          sql`${liveSessions.status} not in ('finished', 'cancelled')`,
+        ),
+      )
+      .limit(1),
+  ]);
+
+  return {
+    examActive: examRow.length > 0,
+    liveActive: liveRow.length > 0,
+  };
 }
 
 /** One teacher's whole-portfolio overview — every quiz they own, not one quiz at a time like
