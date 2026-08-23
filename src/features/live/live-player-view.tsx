@@ -19,6 +19,8 @@ import type {
   LiveStateSync,
   LiveYourResult,
 } from "@/backend/live/live.schema";
+import { AnimatedLeaderboardList } from "@/features/live/animated-leaderboard";
+import { LeaderboardPodium } from "@/features/live/leaderboard-podium";
 import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
 import { cn } from "@/lib/utils";
@@ -83,7 +85,9 @@ export function LivePlayerView({
     function join() {
       socket.emit(
         "live:join",
-        guestName && guestToken ? { sessionId, guestName, guestToken } : { sessionId },
+        guestName && guestToken
+          ? { sessionId, guestName, guestToken }
+          : { sessionId },
       );
     }
     function onStateSync(state: LiveStateSync) {
@@ -361,22 +365,7 @@ export function LivePlayerView({
               {yourRank ? `#${yourRank}` : "—"}
             </p>
           </div>
-          <div className="flex flex-col gap-2">
-            {leaderboardTop.map((entry) => (
-              <div
-                key={entry.participantId}
-                className="border-border flex items-center justify-between rounded-lg border p-3 text-sm"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="text-muted-foreground font-mono">
-                    #{entry.rank}
-                  </span>
-                  {entry.name}
-                </span>
-                <span className="font-mono font-semibold">{entry.score}</span>
-              </div>
-            ))}
-          </div>
+          <AnimatedLeaderboardList entries={leaderboardTop} />
         </div>
       )}
 
@@ -387,24 +376,7 @@ export function LivePlayerView({
           <p className="text-muted-foreground text-sm">
             Final score: {totalScore}
           </p>
-          {standings.length > 0 && (
-            <div className="mt-2 flex w-full flex-col gap-2 text-left">
-              {standings.slice(0, 5).map((entry) => (
-                <div
-                  key={entry.participantId}
-                  className="border-border flex items-center justify-between rounded-lg border p-3 text-sm"
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="text-muted-foreground font-mono">
-                      #{entry.rank}
-                    </span>
-                    {entry.name}
-                  </span>
-                  <span className="font-mono font-semibold">{entry.score}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          {standings.length > 0 && <LeaderboardPodium standings={standings} />}
           <Button asChild>
             <Link href={guestName ? "/play" : "/student"}>
               {guestName ? "Play another game" : "Back to Dashboard"}

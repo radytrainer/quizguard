@@ -25,6 +25,8 @@ import type {
   LiveRosterEntry,
 } from "@/backend/live/live.schema";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
+import { AnimatedLeaderboardList } from "@/features/live/animated-leaderboard";
+import { LeaderboardPodium } from "@/features/live/leaderboard-podium";
 import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { cn } from "@/lib/utils";
 
@@ -211,8 +213,8 @@ export function LiveHostView({
                 Scan to join — no account needed
               </p>
               <p className="text-muted-foreground text-xs">
-                or go to <span className="font-medium">{origin}/play</span>{" "}
-                and enter the code
+                or go to <span className="font-medium">{origin}/play</span> and
+                enter the code
               </p>
             </div>
           )}
@@ -332,27 +334,13 @@ export function LiveHostView({
       {phase === "leaderboard" && (
         <div className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6">
           <h2 className="text-center text-lg font-semibold">Leaderboard</h2>
-          <div className="flex flex-col gap-2">
-            {leaderboard.map((entry) => (
-              <div
-                key={entry.participantId}
-                className="border-border flex items-center justify-between rounded-lg border p-3"
-              >
-                <span className="flex items-center gap-3">
-                  <span className="text-muted-foreground w-6 font-mono">
-                    #{entry.rank}
-                  </span>
-                  <span className="font-medium">{entry.name}</span>
-                </span>
-                <span className="font-mono font-semibold">{entry.score}</span>
-              </div>
-            ))}
-            {leaderboard.length === 0 && (
-              <p className="text-muted-foreground text-center text-sm">
-                No answers yet.
-              </p>
-            )}
-          </div>
+          {leaderboard.length === 0 ? (
+            <p className="text-muted-foreground text-center text-sm">
+              No answers yet.
+            </p>
+          ) : (
+            <AnimatedLeaderboardList entries={leaderboard} />
+          )}
           <Button
             size="lg"
             onClick={() => act("live:host_next")}
@@ -370,22 +358,7 @@ export function LiveHostView({
             <Award className="text-primary size-10" />
             <h2 className="text-lg font-semibold">Final Results</h2>
           </div>
-          <div className="flex flex-col gap-2">
-            {standings.map((entry) => (
-              <div
-                key={entry.participantId}
-                className="border-border flex items-center justify-between rounded-lg border p-3"
-              >
-                <span className="flex items-center gap-3">
-                  <span className="text-muted-foreground w-6 font-mono">
-                    #{entry.rank}
-                  </span>
-                  <span className="font-medium">{entry.name}</span>
-                </span>
-                <span className="font-mono font-semibold">{entry.score}</span>
-              </div>
-            ))}
-          </div>
+          <LeaderboardPodium standings={standings} />
           <Button asChild size="lg" className="self-center">
             <Link href="/teacher/live">Back to Live Games</Link>
           </Button>
