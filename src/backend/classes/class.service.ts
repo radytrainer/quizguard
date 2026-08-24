@@ -12,7 +12,7 @@ import {
   sql,
 } from "drizzle-orm";
 
-import { conflict, notFound } from "@/lib/api-response";
+import { conflict, forbidden, notFound } from "@/lib/api-response";
 import { db } from "@/lib/db";
 import {
   classes,
@@ -20,6 +20,7 @@ import {
   students,
   users,
   type Class,
+  type Gender,
 } from "@/database/schema";
 import type { AuthUser } from "@/backend/auth/session";
 import type {
@@ -49,6 +50,7 @@ export interface RosterMember {
   name: string;
   email: string;
   studentNumber: string | null;
+  gender: Gender | null;
 }
 
 async function requireActiveClass(id: string): Promise<Class> {
@@ -184,6 +186,7 @@ export async function listRoster(
       name: users.name,
       email: users.email,
       studentNumber: students.studentNumber,
+      gender: students.gender,
     })
     .from(classStudents)
     .innerJoin(students, eq(students.userId, classStudents.studentId))
@@ -284,10 +287,37 @@ export async function searchAvailableStudents(
       name: users.name,
       email: users.email,
       studentNumber: students.studentNumber,
+      gender: students.gender,
     })
     .from(students)
     .innerJoin(users, eq(users.id, students.userId))
     .where(and(...conditions))
     .orderBy(users.name)
     .limit(20);
+}
+
+/** Guards the teacher-facing student-account edit/delete routes (api/students/[id]) — unlike
+ * the roster actions above, editing/deleting a student's *account* isn't scoped to one class,
+ * so this checks across every class the requester owns rather than reusing requireOwnedClass
+ * against a single classId. Admin bypasses, same as assertOwner. */
+export async function assertStudentInTeachersRoster(
+  studentId: string,
+  requester: AuthUser,
+): Promise<void> {
+  if (requester.role === "admin") return;
+
+  const [row] = await db
+    .select({ classId: classStudents.classId })
+    .from(classStudents)
+    .innerJoin(classes, eq(classes.id, classStudents.classId))
+    .where(
+      and(
+        eq(classStudents.studentId, studentId),
+        eq(classes.teacherId, requester.id),
+        isNull(classes.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!row) throw forbidden("This student is not in one of your classes");
 }

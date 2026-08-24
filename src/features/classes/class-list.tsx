@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Search } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -23,6 +29,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+async function readErrorMessage(res: Response, fallback: string) {
+  const body = (await res.json().catch(() => null)) as {
+    error?: { message?: string };
+  } | null;
+  return body?.error?.message ?? fallback;
+}
 
 interface ClassRow {
   id: string;
@@ -122,6 +135,96 @@ function CreateClassDialog({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+// Split from the dialog shell so `key={cls.id}` (below) can force a fresh mount — and
+// therefore fresh initial state — whenever a different row's edit is opened, instead of
+// syncing state to a changing prop via an effect (react-hooks/set-state-in-effect).
+function EditClassForm({
+  cls,
+  onOpenChange,
+  onUpdated,
+}: {
+  cls: ClassRow;
+  onOpenChange: (open: boolean) => void;
+  onUpdated: () => void;
+}) {
+  const [name, setName] = useState(cls.name);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/classes/${cls.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        setError(await readErrorMessage(res, "Failed to update class."));
+        return;
+      }
+      onOpenChange(false);
+      onUpdated();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <DialogContent>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <DialogHeader>
+          <DialogTitle>Rename class</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="edit-class-name">Name</Label>
+          <Input
+            id="edit-class-name"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        {error && (
+          <p role="alert" className="text-destructive text-sm">
+            {error}
+          </p>
+        )}
+        <DialogFooter>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  );
+}
+
+function EditClassDialog({
+  cls,
+  onOpenChange,
+  onUpdated,
+}: {
+  cls: ClassRow | null;
+  onOpenChange: (open: boolean) => void;
+  onUpdated: () => void;
+}) {
+  return (
+    <Dialog open={cls !== null} onOpenChange={onOpenChange}>
+      {cls && (
+        <EditClassForm
+          key={cls.id}
+          cls={cls}
+          onOpenChange={onOpenChange}
+          onUpdated={onUpdated}
+        />
+      )}
+    </Dialog>
+  );
+}
+
 export function ClassList() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -131,7 +234,9 @@ export function ClassList() {
   const [result, setResult] = useState<ListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [editingClass, setEditingClass] = useState<ClassRow | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,6 +271,17 @@ export function ClassList() {
     setPage(1);
   }
 
+  async function handleDeleteClass(cls: ClassRow) {
+    if (!confirm(`Delete "${cls.name}"? This cannot be undone.`)) return;
+    setActionError(null);
+    const res = await fetch(`/api/classes/${cls.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      setActionError(await readErrorMessage(res, "Failed to delete class."));
+      return;
+    }
+    setRefreshKey((k) => k + 1);
+  }
+
   const totalPages = result
     ? Math.max(1, Math.ceil(result.total / pageSize))
     : 1;
@@ -194,6 +310,12 @@ export function ClassList() {
           />
         </div>
       </div>
+
+      {actionError && (
+        <p role="alert" className="text-destructive text-sm">
+          {actionError}
+        </p>
+      )}
 
       <div className="bg-card border-outline-variant overflow-hidden rounded-xl border shadow-sm">
         <Table>
@@ -233,11 +355,40 @@ export function ClassList() {
                     {cls.studentCount}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" asChild>
-                      <Link href={`/teacher/classes/${cls.id}`}>
-                        Manage roster
-                      </Link>
-                    </Button>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href={`/teacher/classes/${cls.id}`}>
+                          Manage roster
+                        </Link>
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="Class actions"
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => setEditingClass(cls)}
+                          >
+                            <Pencil />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => handleDeleteClass(cls)}
+                          >
+                            <Trash2 />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -275,6 +426,14 @@ export function ClassList() {
           </div>
         )}
       </div>
+
+      <EditClassDialog
+        cls={editingClass}
+        onOpenChange={(open) => {
+          if (!open) setEditingClass(null);
+        }}
+        onUpdated={() => setRefreshKey((k) => k + 1)}
+      />
     </div>
   );
 }

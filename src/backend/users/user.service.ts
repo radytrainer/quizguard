@@ -124,6 +124,37 @@ export async function getUser(id: string): Promise<PublicUser> {
   return requireActiveUser(id);
 }
 
+// Used by the teacher "edit student" flow (class.service.ts's ownership check gates who may
+// call this) — updates the roster-facing profile fields in one transaction. Deliberately
+// doesn't touch email/password, same reasoning as createStudentAccount vs. updateUser: a login
+// credential change is a bigger, separate concern than editing a roster profile.
+export async function updateStudentProfile(
+  id: string,
+  input: { name: string; studentNumber?: string; gender?: Gender },
+): Promise<PublicUser> {
+  const existing = await requireActiveUser(id);
+  if (existing.role !== "student") throw notFound("Student not found");
+
+  return db.transaction(async (tx) => {
+    const [user] = await tx
+      .update(users)
+      .set({ name: input.name, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning(publicColumns);
+
+    await tx
+      .update(students)
+      .set({
+        studentNumber: input.studentNumber ? input.studentNumber : null,
+        gender: input.gender ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(students.userId, id));
+
+    return user;
+  });
+}
+
 export async function updateUser(
   id: string,
   input: UpdateUserInput,

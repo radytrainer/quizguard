@@ -37,3 +37,14 @@ export const createStudentSchema = z.object({
 });
 
 export type CreateStudentInput = z.infer<typeof createStudentSchema>;
+
+// A teacher editing an existing student's profile — no email/password here (unlike
+// createStudentSchema): changing a login credential is a bigger, separate concern than
+// updating a roster profile, and admin's own updateUserSchema doesn't touch email either.
+export const updateStudentSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(200),
+  studentNumber: z.string().trim().max(50).optional(),
+  gender: z.enum(genderValues).optional(),
+});
+
+export type UpdateStudentInput = z.infer<typeof updateStudentSchema>;

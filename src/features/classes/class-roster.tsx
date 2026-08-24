@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileUp, Plus, Search, UserPlus, X } from "lucide-react";
+import {
+  FileUp,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  UserPlus,
+  X,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +30,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -46,6 +61,7 @@ export interface RosterMember {
   name: string;
   email: string;
   studentNumber: string | null;
+  gender: Gender | null;
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
@@ -72,6 +88,9 @@ export function ClassRoster({
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<RosterMember | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -137,6 +156,31 @@ export function ClassRoster({
     }
   }
 
+  async function deleteStudent(student: RosterMember) {
+    if (
+      !confirm(
+        `Permanently delete ${student.name}'s account? This removes them from every class, not just this one, and cannot be undone.`,
+      )
+    )
+      return;
+    setPendingId(student.studentId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/students/${student.studentId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        setError(await readErrorMessage(res, "Failed to delete student."));
+        return;
+      }
+      setRoster((prev) =>
+        prev.filter((s) => s.studentId !== student.studentId),
+      );
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <Card>
@@ -162,16 +206,38 @@ export function ClassRoster({
               {student.studentNumber && (
                 <Badge variant="outline">{student.studentNumber}</Badge>
               )}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                disabled={pendingId === student.studentId}
-                onClick={() => removeStudent(student.studentId)}
-                aria-label="Remove from roster"
-              >
-                <X className="text-destructive size-4" />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={pendingId === student.studentId}
+                    aria-label="Student actions"
+                  >
+                    <MoreVertical className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setEditingStudent(student)}>
+                    <Pencil />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => removeStudent(student.studentId)}
+                  >
+                    <X />
+                    Remove from roster
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => deleteStudent(student)}
+                  >
+                    <Trash2 />
+                    Delete account
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           ))}
           {error && (
@@ -266,6 +332,19 @@ export function ClassRoster({
         open={importOpen}
         onOpenChange={setImportOpen}
         onImported={(nextRoster) => setRoster(nextRoster)}
+      />
+
+      <EditStudentDialog
+        student={editingStudent}
+        onOpenChange={(open) => {
+          if (!open) setEditingStudent(null);
+        }}
+        onUpdated={(updated) => {
+          setRoster((prev) =>
+            prev.map((s) => (s.studentId === updated.studentId ? updated : s)),
+          );
+          setEditingStudent(null);
+        }}
       />
     </div>
   );
@@ -397,6 +476,133 @@ function CreateStudentDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+    </Dialog>
+  );
+}
+
+// Split from the dialog shell so `key={student.studentId}` (below) can force a fresh mount —
+// and therefore fresh initial state — whenever a different row's edit is opened, instead of
+// syncing state to a changing prop via an effect (react-hooks/set-state-in-effect).
+function EditStudentForm({
+  student,
+  onOpenChange,
+  onUpdated,
+}: {
+  student: RosterMember;
+  onOpenChange: (open: boolean) => void;
+  onUpdated: (student: RosterMember) => void;
+}) {
+  const [name, setName] = useState(student.name);
+  const [studentNumber, setStudentNumber] = useState(
+    student.studentNumber ?? "",
+  );
+  const [gender, setGender] = useState<Gender>(student.gender ?? "male");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/students/${student.studentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, studentNumber, gender }),
+      });
+      if (!res.ok) {
+        setError(await readErrorMessage(res, "Failed to update student."));
+        return;
+      }
+      onOpenChange(false);
+      onUpdated({
+        ...student,
+        name,
+        studentNumber: studentNumber ? studentNumber : null,
+        gender,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <DialogContent>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <DialogHeader>
+          <DialogTitle>Edit student</DialogTitle>
+          <DialogDescription>
+            Updates this student&apos;s roster profile. Their email and password
+            stay the same.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="edit-student-name">Name</Label>
+          <Input
+            id="edit-student-name"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="edit-student-number">Student number</Label>
+          <Input
+            id="edit-student-number"
+            value={studentNumber}
+            onChange={(e) => setStudentNumber(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="edit-student-gender">Gender</Label>
+          <Select value={gender} onValueChange={(v) => setGender(v as Gender)}>
+            <SelectTrigger id="edit-student-gender">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="male">Male</SelectItem>
+              <SelectItem value="female">Female</SelectItem>
+              <SelectItem value="other">Other</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {error && (
+          <p role="alert" className="text-destructive text-sm">
+            {error}
+          </p>
+        )}
+
+        <DialogFooter>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  );
+}
+
+function EditStudentDialog({
+  student,
+  onOpenChange,
+  onUpdated,
+}: {
+  student: RosterMember | null;
+  onOpenChange: (open: boolean) => void;
+  onUpdated: (student: RosterMember) => void;
+}) {
+  return (
+    <Dialog open={student !== null} onOpenChange={onOpenChange}>
+      {student && (
+        <EditStudentForm
+          key={student.studentId}
+          student={student}
+          onOpenChange={onOpenChange}
+          onUpdated={onUpdated}
+        />
+      )}
     </Dialog>
   );
 }
