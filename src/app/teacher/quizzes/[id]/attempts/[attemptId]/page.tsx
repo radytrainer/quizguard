@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { getCurrentUser } from "@/backend/auth/session";
 import { getAttemptDetailForTeacher } from "@/backend/monitoring/monitoring.service";
+import { getQuiz } from "@/backend/quizzes/quiz.service";
 import { ApiError } from "@/lib/api-response";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -32,6 +33,17 @@ export default async function AttemptDetailPage({
   if (user.role !== "teacher" && user.role !== "admin") redirect("/dashboard");
 
   const { id, attemptId } = await params;
+
+  try {
+    await getQuiz(id, user);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 403)
+    )
+      notFound();
+    throw error;
+  }
 
   let attempt;
   try {
