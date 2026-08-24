@@ -17,10 +17,11 @@ const navLinks = [
 
 export function SiteHeader({ user }: { user: AuthUser | null }) {
   const signedInHref = user ? "/dashboard" : "/login";
-  // "Get Started" is the sign-up CTA, distinct from "Sign In" — self-registration is
-  // teacher-only right now (auth.schema.ts's registerSchema), so this always lands there for a
-  // logged-out visitor regardless of whether they end up being a teacher, student, or admin.
-  const getStartedHref = user ? "/dashboard" : "/register";
+  // Was "Get Started" — role-agnostic wording that students clicked expecting a generic
+  // signup, only to end up creating a teacher account by accident (self-registration is
+  // teacher-only right now, auth.schema.ts's registerSchema). Naming the button "Teacher
+  // Sign Up" instead tells a student not to click it before they ever land on /register.
+  const registerHref = user ? "/dashboard" : "/register";
 
   return (
     <header className="border-border/60 bg-background/80 sticky top-0 z-40 border-b backdrop-blur-sm">
@@ -49,8 +50,8 @@ export function SiteHeader({ user }: { user: AuthUser | null }) {
             </Button>
           )}
           <Button asChild>
-            <Link href={getStartedHref}>
-              {user ? "Go to Dashboard" : "Get Started"}
+            <Link href={registerHref}>
+              {user ? "Go to Dashboard" : "Teacher Sign Up"}
             </Link>
           </Button>
         </div>

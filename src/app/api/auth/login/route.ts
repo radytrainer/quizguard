@@ -18,17 +18,37 @@ export async function POST(request: NextRequest) {
     const ip =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       "unknown";
-    const rateLimit = await checkRateLimit(`login:${ip}`, {
-      limit: 10,
+
+    // Generous, IP-only: guards against broad automated abuse from one source, not against a
+    // single account being brute-forced (that's the per-account check below). Deliberately high
+    // — a classroom of students sharing one school/NAT IP during an exam can easily produce
+    // dozens of legitimate login attempts within a few minutes, and a low IP-wide ceiling here
+    // previously meant one student's typos could lock out the rest of the class.
+    const ipLimit = await checkRateLimit(`login:ip:${ip}`, {
+      limit: 100,
       windowSeconds: 15 * 60,
     });
-    if (!rateLimit.allowed) {
+    if (!ipLimit.allowed) {
       throw tooManyRequests(
         "Too many login attempts. Try again in a few minutes.",
       );
     }
 
     const input = loginSchema.parse(await request.json());
+
+    // The actual brute-force protection, scoped to the account being targeted rather than the
+    // source IP — so it can't be tripped by other students' unrelated attempts sharing the same
+    // network, and still limits repeated guessing against any one account regardless of IP.
+    const accountLimit = await checkRateLimit(`login:email:${input.email}`, {
+      limit: 10,
+      windowSeconds: 15 * 60,
+    });
+    if (!accountLimit.allowed) {
+      throw tooManyRequests(
+        "Too many login attempts for this account. Try again in a few minutes.",
+      );
+    }
+
     const { user, sessionToken } = await login(input);
     await setSessionCookie(sessionToken);
 

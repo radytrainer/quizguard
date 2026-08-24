@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
-import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Info, ShieldCheck } from "lucide-react";
 
 import { RegisterForm } from "@/features/auth/register-form";
 
@@ -67,6 +67,25 @@ export default async function RegisterPage() {
             <p className="text-muted-foreground text-sm">
               Self-registration is open for teachers only right now — student
               and admin accounts are added by your school.
+            </p>
+          </div>
+
+          {/* Deliberately loud (not just small muted text like the paragraph above) — students
+              following the homepage's sign-up button were landing here and creating themselves
+              teacher accounts by accident before this existed. */}
+          <div className="border-warning/30 bg-warning/10 text-warning mb-6 flex items-start gap-2 rounded-lg border p-3 text-sm">
+            <Info className="mt-0.5 size-4 shrink-0" />
+            <p>
+              <span className="font-semibold">Are you a student?</span> You
+              don&apos;t need to sign up here — your teacher creates your login
+              for you. Ask them for your email and password, then{" "}
+              <Link
+                href="/login"
+                className="font-medium underline underline-offset-2"
+              >
+                sign in
+              </Link>
+              .
             </p>
           </div>
 

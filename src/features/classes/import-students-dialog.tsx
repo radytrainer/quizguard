@@ -97,7 +97,10 @@ export function ImportStudentsDialog({
           <DialogDescription>
             Upload a .xlsx or .csv file with columns Name, Email, Password, and
             Gender (male, female, or other). Each row creates an account and
-            enrolls it in this class.
+            enrolls it in this class. Avoid all-numeric passwords (e.g.
+            &quot;00012345&quot;) — spreadsheet apps often strip leading zeros
+            before you upload, so the student&apos;s real password ends up
+            shorter than what you see in the cell.
           </DialogDescription>
         </DialogHeader>
 
