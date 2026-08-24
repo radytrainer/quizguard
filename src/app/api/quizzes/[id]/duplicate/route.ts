@@ -12,7 +12,7 @@ export async function POST(
     const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    const quiz = await duplicateQuiz(id, user.id);
+    const quiz = await duplicateQuiz(id, user);
 
     return NextResponse.json({ quiz }, { status: 201 });
   } catch (error) {

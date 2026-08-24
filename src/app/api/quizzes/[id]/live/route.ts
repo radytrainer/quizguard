@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { apiErrorResponse, forbidden } from "@/lib/api-response";
+import { apiErrorResponse } from "@/lib/api-response";
 import { requireApiUser } from "@/backend/auth/rbac";
 import { getClass } from "@/backend/classes/class.service";
 import { createLiveSessionSchema } from "@/backend/live/live.schema";
@@ -15,18 +15,12 @@ export async function POST(
     const requester = await requireApiUser(["admin", "teacher"]);
     const { id } = await ctx.params;
 
-    const quiz = await getQuiz(id);
-    if (requester.role === "teacher" && quiz.createdBy !== requester.id) {
-      throw forbidden("This quiz does not belong to you");
-    }
+    await getQuiz(id, requester);
 
     const input = createLiveSessionSchema.parse(await request.json());
 
     if (input.classId) {
-      const cls = await getClass(input.classId);
-      if (requester.role === "teacher" && cls.teacherId !== requester.id) {
-        throw forbidden("This class does not belong to you");
-      }
+      await getClass(input.classId, requester);
     }
 
     const session = await createLiveSession(requester.id, id, input);

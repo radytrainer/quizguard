@@ -7,15 +7,18 @@ import {
   createAssignment,
   listAssignmentsForQuiz,
 } from "@/backend/assignments/assignment.service";
+import { getClass } from "@/backend/classes/class.service";
+import { getQuiz } from "@/backend/quizzes/quiz.service";
 
 export async function GET(
   _request: Request,
   ctx: RouteContext<"/api/quizzes/[id]/assignments">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
+    await getQuiz(id, user);
     const assignments = await listAssignmentsForQuiz(id);
 
     return NextResponse.json({ assignments });
@@ -32,7 +35,11 @@ export async function POST(
     const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
+    await getQuiz(id, user);
     const input = assignmentInputSchema.parse(await request.json());
+    if (input.classId) {
+      await getClass(input.classId, user);
+    }
     const assignment = await createAssignment(id, input, user.id);
 
     return NextResponse.json({ assignment }, { status: 201 });

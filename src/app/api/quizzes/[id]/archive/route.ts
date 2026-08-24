@@ -9,10 +9,10 @@ export async function POST(
   ctx: RouteContext<"/api/quizzes/[id]/archive">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    const quiz = await archiveQuiz(id);
+    const quiz = await archiveQuiz(id, user);
 
     return NextResponse.json({ quiz });
   } catch (error) {

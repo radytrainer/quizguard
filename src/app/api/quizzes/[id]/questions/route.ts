@@ -13,10 +13,10 @@ export async function GET(
   ctx: RouteContext<"/api/quizzes/[id]/questions">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    const pool = await getQuizQuestionPool(id);
+    const pool = await getQuizQuestionPool(id, user);
 
     return NextResponse.json({ pool });
   } catch (error) {
@@ -29,12 +29,12 @@ export async function PUT(
   ctx: RouteContext<"/api/quizzes/[id]/questions">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
     const { questionIds } = quizQuestionPoolSchema.parse(await request.json());
-    await setQuizQuestionPool(id, questionIds);
-    const pool = await getQuizQuestionPool(id);
+    await setQuizQuestionPool(id, questionIds, user);
+    const pool = await getQuizQuestionPool(id, user);
 
     return NextResponse.json({ pool });
   } catch (error) {

@@ -26,7 +26,7 @@ export default async function TeacherLiveSessionPage({
     redirect("/teacher/live");
   }
 
-  const quiz = await getQuiz(session.quizId);
+  const quiz = await getQuiz(session.quizId, user);
 
   return (
     <main className="flex flex-1 flex-col p-4 sm:p-6 lg:p-8">

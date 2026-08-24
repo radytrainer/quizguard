@@ -25,12 +25,16 @@ export default async function ClassRosterPage({
 
   let cls;
   try {
-    cls = await getClass(id);
+    cls = await getClass(id, user);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) notFound();
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 403)
+    )
+      notFound();
     throw error;
   }
-  const roster = await listRoster(id);
+  const roster = await listRoster(id, user);
   const results = await getClassResults(id);
 
   return (

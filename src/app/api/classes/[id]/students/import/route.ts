@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   apiErrorResponse,
   conflict,
-  forbidden,
   tooManyRequests,
 } from "@/lib/api-response";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -14,7 +13,6 @@ import { MAX_IMPORT_FILE_BYTES } from "@/backend/imports/parse-limits";
 import { createStudentSchema } from "@/backend/classes/class.schema";
 import {
   createStudentInClass,
-  getClass,
   listRoster,
 } from "@/backend/classes/class.service";
 
@@ -40,14 +38,6 @@ export async function POST(
   try {
     const requester = await requireApiUser(["admin", "teacher"]);
     const { id } = await ctx.params;
-
-    // Admins may import into any class; teachers only into their own.
-    if (requester.role === "teacher") {
-      const cls = await getClass(id);
-      if (cls.teacherId !== requester.id) {
-        throw forbidden("This class does not belong to you");
-      }
-    }
 
     const rateLimit = await checkRateLimit(`import-students:${requester.id}`, {
       limit: 10,
@@ -113,7 +103,7 @@ export async function POST(
       }
 
       try {
-        await createStudentInClass(id, result.data);
+        await createStudentInClass(id, result.data, requester);
         successCount++;
       } catch (err) {
         errors.push({
@@ -124,7 +114,7 @@ export async function POST(
       }
     }
 
-    const roster = await listRoster(id);
+    const roster = await listRoster(id, requester);
 
     return NextResponse.json({
       roster,

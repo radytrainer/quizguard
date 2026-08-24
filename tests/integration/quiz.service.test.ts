@@ -15,6 +15,7 @@ import {
   users,
 } from "@/database/schema";
 import { hashPassword } from "@/backend/auth/password";
+import type { AuthUser } from "@/backend/auth/session";
 import type { QuestionInput } from "@/backend/questions/question.schema";
 import { createQuestion } from "@/backend/questions/question.service";
 import type { QuizInput } from "@/backend/quizzes/quiz.schema";
@@ -37,6 +38,7 @@ describe("quiz.service (integration)", () => {
   const suffix = randomUUID().slice(0, 8);
   const authorEmail = `quiz-service-author-${suffix}@quizguard.test`;
   let authorId: string;
+  let requester: AuthUser;
   let questionIds: string[];
   let classId: string;
   const studentUserIds: string[] = [];
@@ -69,6 +71,12 @@ describe("quiz.service (integration)", () => {
       })
       .returning();
     authorId = author.id;
+    requester = {
+      id: author.id,
+      email: author.email,
+      name: author.name,
+      role: "teacher",
+    };
     await db.insert(teachers).values({ userId: authorId });
 
     const [cls] = await db
@@ -136,28 +144,34 @@ describe("quiz.service (integration)", () => {
 
   it("reports questionCount via getQuiz", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    const fetched = await getQuiz(quiz.id);
+    const fetched = await getQuiz(quiz.id, requester);
     expect(fetched.questionCount).toBe(0);
 
-    await setQuizQuestionPool(quiz.id, questionIds);
-    const afterPool = await getQuiz(quiz.id);
+    await setQuizQuestionPool(quiz.id, questionIds, requester);
+    const afterPool = await getQuiz(quiz.id, requester);
     expect(afterPool.questionCount).toBe(3);
   });
 
   it("updates quiz settings", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    const updated = await updateQuiz(quiz.id, {
-      ...baseQuiz,
-      title: "Updated title",
-      passingScore: 80,
-    });
+    const updated = await updateQuiz(
+      quiz.id,
+      {
+        ...baseQuiz,
+        title: "Updated title",
+        passingScore: 80,
+      },
+      requester,
+    );
     expect(updated.title).toBe("Updated title");
     expect(updated.passingScore).toBe(80);
   });
 
   it("refuses to publish a quiz with an empty pool", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    await expect(publishQuiz(quiz.id)).rejects.toMatchObject({ status: 409 });
+    await expect(publishQuiz(quiz.id, requester)).rejects.toMatchObject({
+      status: 409,
+    });
   });
 
   it("refuses to publish when the pool is smaller than questionsPerAttempt", async () => {
@@ -165,109 +179,125 @@ describe("quiz.service (integration)", () => {
       { ...baseQuiz, questionsPerAttempt: 5 },
       authorId,
     );
-    await setQuizQuestionPool(quiz.id, [questionIds[0]]);
-    await expect(publishQuiz(quiz.id)).rejects.toMatchObject({ status: 409 });
+    await setQuizQuestionPool(quiz.id, [questionIds[0]], requester);
+    await expect(publishQuiz(quiz.id, requester)).rejects.toMatchObject({
+      status: 409,
+    });
   });
 
   it("publishes, unpublishes, and archives a quiz", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    await setQuizQuestionPool(quiz.id, questionIds);
+    await setQuizQuestionPool(quiz.id, questionIds, requester);
 
-    const published = await publishQuiz(quiz.id);
+    const published = await publishQuiz(quiz.id, requester);
     expect(published.status).toBe("published");
 
-    const unpublished = await unpublishQuiz(quiz.id);
+    const unpublished = await unpublishQuiz(quiz.id, requester);
     expect(unpublished.status).toBe("draft");
 
-    const archived = await archiveQuiz(quiz.id);
+    const archived = await archiveQuiz(quiz.id, requester);
     expect(archived.status).toBe("archived");
   });
 
   it("replaces the question pool rather than merging", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    await setQuizQuestionPool(quiz.id, questionIds);
-    await setQuizQuestionPool(quiz.id, [questionIds[0]]);
+    await setQuizQuestionPool(quiz.id, questionIds, requester);
+    await setQuizQuestionPool(quiz.id, [questionIds[0]], requester);
 
-    const pool = await getQuizQuestionPool(quiz.id);
+    const pool = await getQuizQuestionPool(quiz.id, requester);
     expect(pool).toHaveLength(1);
     expect(pool[0].id).toBe(questionIds[0]);
   });
 
   it("duplicates a quiz with its settings and pool, resetting status to draft", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    await setQuizQuestionPool(quiz.id, questionIds);
-    await publishQuiz(quiz.id);
+    await setQuizQuestionPool(quiz.id, questionIds, requester);
+    await publishQuiz(quiz.id, requester);
 
-    const copy = await duplicateQuiz(quiz.id, authorId);
+    const copy = await duplicateQuiz(quiz.id, requester);
     expect(copy.id).not.toBe(quiz.id);
     expect(copy.title).toBe(`${baseQuiz.title} (Copy)`);
     expect(copy.status).toBe("draft");
 
-    const copyPool = await getQuizQuestionPool(copy.id);
+    const copyPool = await getQuizQuestionPool(copy.id, requester);
     expect(copyPool).toHaveLength(3);
   });
 
   it("soft-deletes: getQuiz 404s afterward", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    await deleteQuiz(quiz.id);
+    await deleteQuiz(quiz.id, requester);
 
-    await expect(getQuiz(quiz.id)).rejects.toMatchObject({ status: 404 });
+    await expect(getQuiz(quiz.id, requester)).rejects.toMatchObject({
+      status: 404,
+    });
   });
 
   it("filters listQuizzes by subject and status, and reports questionCount", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    await setQuizQuestionPool(quiz.id, questionIds);
-    await publishQuiz(quiz.id);
+    await setQuizQuestionPool(quiz.id, questionIds, requester);
+    await publishQuiz(quiz.id, requester);
 
-    const bySubject = await listQuizzes({
-      subject: baseQuiz.subject,
-      page: 1,
-      pageSize: 50,
-    });
+    const bySubject = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(bySubject.total).toBeGreaterThanOrEqual(1);
     const found = bySubject.items.find((q) => q.id === quiz.id);
     expect(found?.questionCount).toBe(3);
 
-    const byStatus = await listQuizzes({
-      subject: baseQuiz.subject,
-      status: "published",
-      page: 1,
-      pageSize: 50,
-    });
+    const byStatus = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        status: "published",
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(byStatus.items.every((q) => q.status === "published")).toBe(true);
   });
 
   it("reports studentCount from the assigned class's roster", async () => {
     const quiz = await createQuiz(baseQuiz, authorId);
-    await setQuizQuestionPool(quiz.id, questionIds);
-    await publishQuiz(quiz.id);
+    await setQuizQuestionPool(quiz.id, questionIds, requester);
+    await publishQuiz(quiz.id, requester);
     await createAssignment(quiz.id, { classId }, authorId);
 
-    const result = await listQuizzes({
-      subject: baseQuiz.subject,
-      page: 1,
-      pageSize: 50,
-    });
+    const result = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     const found = result.items.find((q) => q.id === quiz.id);
     expect(found?.studentCount).toBe(2);
   });
 
   it("filters by classId to only quizzes assigned to that class", async () => {
     const assigned = await createQuiz(baseQuiz, authorId);
-    await setQuizQuestionPool(assigned.id, questionIds);
-    await publishQuiz(assigned.id);
+    await setQuizQuestionPool(assigned.id, questionIds, requester);
+    await publishQuiz(assigned.id, requester);
     await createAssignment(assigned.id, { classId }, authorId);
 
     const unassigned = await createQuiz(baseQuiz, authorId);
-    await setQuizQuestionPool(unassigned.id, questionIds);
-    await publishQuiz(unassigned.id);
+    await setQuizQuestionPool(unassigned.id, questionIds, requester);
+    await publishQuiz(unassigned.id, requester);
 
-    const result = await listQuizzes({
-      subject: baseQuiz.subject,
-      classId,
-      page: 1,
-      pageSize: 50,
-    });
+    const result = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        classId,
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     const ids = result.items.map((q) => q.id);
     expect(ids).toContain(assigned.id);
     expect(ids).not.toContain(unassigned.id);
@@ -279,34 +309,43 @@ describe("quiz.service (integration)", () => {
       { ...baseQuiz, startAt: futureStart },
       authorId,
     );
-    await setQuizQuestionPool(quiz.id, questionIds);
-    await publishQuiz(quiz.id);
+    await setQuizQuestionPool(quiz.id, questionIds, requester);
+    await publishQuiz(quiz.id, requester);
 
-    const all = await listQuizzes({
-      subject: baseQuiz.subject,
-      page: 1,
-      pageSize: 50,
-    });
+    const all = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     const found = all.items.find((q) => q.id === quiz.id);
     expect(found?.status).toBe("published");
     expect(found?.displayStatus).toBe("scheduled");
 
     // The underlying stored status still matches a plain "published" filter — "scheduled" is
     // a narrower view onto the same rows, not a separate status a quiz actually has.
-    const byPublished = await listQuizzes({
-      subject: baseQuiz.subject,
-      status: "published",
-      page: 1,
-      pageSize: 50,
-    });
+    const byPublished = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        status: "published",
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(byPublished.items.map((q) => q.id)).toContain(quiz.id);
 
-    const byScheduled = await listQuizzes({
-      subject: baseQuiz.subject,
-      status: "scheduled",
-      page: 1,
-      pageSize: 50,
-    });
+    const byScheduled = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        status: "scheduled",
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(byScheduled.items.map((q) => q.id)).toContain(quiz.id);
   });
 
@@ -316,22 +355,28 @@ describe("quiz.service (integration)", () => {
       { ...baseQuiz, startAt: targetDay },
       authorId,
     );
-    await setQuizQuestionPool(quiz.id, questionIds);
+    await setQuizQuestionPool(quiz.id, questionIds, requester);
 
-    const sameDay = await listQuizzes({
-      subject: baseQuiz.subject,
-      date: new Date("2030-06-15T00:00:00Z"),
-      page: 1,
-      pageSize: 50,
-    });
+    const sameDay = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        date: new Date("2030-06-15T00:00:00Z"),
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(sameDay.items.map((q) => q.id)).toContain(quiz.id);
 
-    const differentDay = await listQuizzes({
-      subject: baseQuiz.subject,
-      date: new Date("2030-06-16T00:00:00Z"),
-      page: 1,
-      pageSize: 50,
-    });
+    const differentDay = await listQuizzes(
+      {
+        subject: baseQuiz.subject,
+        date: new Date("2030-06-16T00:00:00Z"),
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(differentDay.items.map((q) => q.id)).not.toContain(quiz.id);
   });
 });

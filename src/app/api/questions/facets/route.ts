@@ -6,9 +6,9 @@ import { getQuestionFilterFacets } from "@/backend/questions/question.service";
 
 export async function GET() {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
-    const facets = await getQuestionFilterFacets();
+    const facets = await getQuestionFilterFacets(user);
 
     return NextResponse.json(facets);
   } catch (error) {

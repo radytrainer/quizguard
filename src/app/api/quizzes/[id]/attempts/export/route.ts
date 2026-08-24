@@ -10,11 +10,11 @@ export async function GET(
   ctx: RouteContext<"/api/quizzes/[id]/attempts/export">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
     const [quiz, attempts] = await Promise.all([
-      getQuiz(id),
+      getQuiz(id, user),
       listAttemptsForQuiz(id),
     ]);
 

@@ -35,12 +35,16 @@ export default async function PreviewQuizPage({
 
   let quiz;
   try {
-    quiz = await getQuiz(id);
+    quiz = await getQuiz(id, user);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) notFound();
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 403)
+    )
+      notFound();
     throw error;
   }
-  const pool = await getQuizQuestionPool(id);
+  const pool = await getQuizQuestionPool(id, user);
   const assignments = await listAssignmentsForQuiz(id);
 
   return (

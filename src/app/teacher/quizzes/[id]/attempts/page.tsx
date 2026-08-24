@@ -20,9 +20,13 @@ export default async function QuizAttemptsPage({
 
   let quiz;
   try {
-    quiz = await getQuiz(id);
+    quiz = await getQuiz(id, user);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) notFound();
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 403)
+    )
+      notFound();
     throw error;
   }
   const [attempts, history] = await Promise.all([

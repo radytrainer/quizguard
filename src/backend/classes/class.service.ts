@@ -21,11 +21,13 @@ import {
   users,
   type Class,
 } from "@/database/schema";
+import type { AuthUser } from "@/backend/auth/session";
 import type {
   ClassInput,
   ClassListQuery,
   CreateStudentInput,
 } from "@/backend/classes/class.schema";
+import { assertOwner } from "@/backend/shared/ownership";
 import {
   createStudentAccount,
   type PublicUser,
@@ -60,6 +62,15 @@ async function requireActiveClass(id: string): Promise<Class> {
   return row;
 }
 
+async function requireOwnedClass(
+  id: string,
+  requester: AuthUser,
+): Promise<Class> {
+  const row = await requireActiveClass(id);
+  assertOwner(row.teacherId, requester, "This class does not belong to you");
+  return row;
+}
+
 export async function createClass(
   input: ClassInput,
   authorId: string,
@@ -71,8 +82,11 @@ export async function createClass(
   return row;
 }
 
-export async function getClass(id: string): Promise<ClassWithRosterInfo> {
-  const row = await requireActiveClass(id);
+export async function getClass(
+  id: string,
+  requester: AuthUser,
+): Promise<ClassWithRosterInfo> {
+  const row = await requireOwnedClass(id, requester);
 
   const [{ studentCount }] = await db
     .select({ studentCount: count() })
@@ -85,14 +99,20 @@ export async function getClass(id: string): Promise<ClassWithRosterInfo> {
 export async function updateClass(
   id: string,
   input: ClassInput,
+  requester: AuthUser,
 ): Promise<Class> {
-  await requireActiveClass(id);
+  await requireOwnedClass(id, requester);
 
   const [row] = await db
     .update(classes)
     .set({
       name: input.name,
-      ...(input.teacherId ? { teacherId: input.teacherId } : {}),
+      // Reassigning a class to a different teacher is admin-only (class.schema.ts) — a
+      // teacher-submitted teacherId is silently ignored rather than erroring, since the
+      // teacher-facing UI never sends this field in the first place.
+      ...(requester.role === "admin" && input.teacherId
+        ? { teacherId: input.teacherId }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(classes.id, id))
@@ -101,8 +121,11 @@ export async function updateClass(
   return row;
 }
 
-export async function deleteClass(id: string): Promise<void> {
-  await requireActiveClass(id);
+export async function deleteClass(
+  id: string,
+  requester: AuthUser,
+): Promise<void> {
+  await requireOwnedClass(id, requester);
   await db
     .update(classes)
     .set({ deletedAt: new Date() })
@@ -111,8 +134,12 @@ export async function deleteClass(id: string): Promise<void> {
 
 export async function listClasses(
   query: ClassListQuery,
+  requester: AuthUser,
 ): Promise<ClassListResult> {
   const conditions = [isNull(classes.deletedAt)];
+  if (requester.role !== "admin") {
+    conditions.push(eq(classes.teacherId, requester.id));
+  }
   if (query.search) conditions.push(ilike(classes.name, `%${query.search}%`));
 
   const where = and(...conditions);
@@ -145,8 +172,11 @@ export async function listClasses(
   return { items, total, page: query.page, pageSize: query.pageSize };
 }
 
-export async function listRoster(classId: string): Promise<RosterMember[]> {
-  await requireActiveClass(classId);
+export async function listRoster(
+  classId: string,
+  requester: AuthUser,
+): Promise<RosterMember[]> {
+  await requireOwnedClass(classId, requester);
 
   return db
     .select({
@@ -165,8 +195,9 @@ export async function listRoster(classId: string): Promise<RosterMember[]> {
 export async function addStudentToClass(
   classId: string,
   studentId: string,
+  requester: AuthUser,
 ): Promise<void> {
-  await requireActiveClass(classId);
+  await requireOwnedClass(classId, requester);
 
   const [student] = await db
     .select({ userId: students.userId })
@@ -192,23 +223,23 @@ export async function addStudentToClass(
 
 // Creates a brand-new student account and immediately enrolls it — distinct from
 // addStudentToClass, which only attaches an already-existing student found via search.
-// Caller (the API route) is responsible for verifying the requester may manage this class;
-// this function only checks the class itself still exists.
 export async function createStudentInClass(
   classId: string,
   input: CreateStudentInput,
+  requester: AuthUser,
 ): Promise<PublicUser> {
-  await requireActiveClass(classId);
+  await requireOwnedClass(classId, requester);
   const user = await createStudentAccount(input);
-  await addStudentToClass(classId, user.id);
+  await addStudentToClass(classId, user.id, requester);
   return user;
 }
 
 export async function removeStudentFromClass(
   classId: string,
   studentId: string,
+  requester: AuthUser,
 ): Promise<void> {
-  await requireActiveClass(classId);
+  await requireOwnedClass(classId, requester);
 
   const deleted = await db
     .delete(classStudents)
@@ -228,7 +259,10 @@ export async function removeStudentFromClass(
 export async function searchAvailableStudents(
   classId: string,
   search: string | undefined,
+  requester: AuthUser,
 ): Promise<RosterMember[]> {
+  await requireOwnedClass(classId, requester);
+
   const enrolled = await db
     .select({ studentId: classStudents.studentId })
     .from(classStudents)

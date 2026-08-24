@@ -14,10 +14,10 @@ export async function GET(
   ctx: RouteContext<"/api/quizzes/[id]">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    const quiz = await getQuiz(id);
+    const quiz = await getQuiz(id, user);
 
     return NextResponse.json({ quiz });
   } catch (error) {
@@ -30,11 +30,11 @@ export async function PUT(
   ctx: RouteContext<"/api/quizzes/[id]">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
     const input = quizInputSchema.parse(await request.json());
-    const quiz = await updateQuiz(id, input);
+    const quiz = await updateQuiz(id, input, user);
 
     return NextResponse.json({ quiz });
   } catch (error) {
@@ -47,10 +47,10 @@ export async function DELETE(
   ctx: RouteContext<"/api/quizzes/[id]">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    await deleteQuiz(id);
+    await deleteQuiz(id, user);
 
     return NextResponse.json({ success: true });
   } catch (error) {

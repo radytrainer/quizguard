@@ -16,9 +16,13 @@ export default async function EditQuestionPage({
 
   let question;
   try {
-    question = await getQuestion(id);
+    question = await getQuestion(id, user);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) notFound();
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 403)
+    )
+      notFound();
     throw error;
   }
 

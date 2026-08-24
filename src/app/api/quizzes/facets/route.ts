@@ -6,9 +6,9 @@ import { getQuizFilterFacets } from "@/backend/quizzes/quiz.service";
 
 export async function GET() {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
-    const facets = await getQuizFilterFacets();
+    const facets = await getQuizFilterFacets(user);
 
     return NextResponse.json(facets);
   } catch (error) {

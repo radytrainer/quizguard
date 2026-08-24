@@ -9,10 +9,10 @@ export async function DELETE(
   ctx: RouteContext<"/api/classes/[id]/students/[studentId]">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id, studentId } = await ctx.params;
-    await removeStudentFromClass(id, studentId);
+    await removeStudentFromClass(id, studentId, user);
 
     return NextResponse.json({ success: true });
   } catch (error) {

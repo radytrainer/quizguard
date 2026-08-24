@@ -10,6 +10,7 @@ import {
   submitAttempt,
 } from "@/backend/attempts/attempt.service";
 import { hashPassword } from "@/backend/auth/password";
+import type { AuthUser } from "@/backend/auth/session";
 import { saveAnswer } from "@/backend/answers/answer.service";
 import type { QuestionInput } from "@/backend/questions/question.schema";
 import { createQuestion } from "@/backend/questions/question.service";
@@ -40,6 +41,7 @@ describe("results.service (integration)", () => {
   const suffix = randomUUID().slice(0, 8);
   const userIds: string[] = [];
   let teacherId: string;
+  let requester: AuthUser;
   let studentAId: string;
   let studentBId: string;
   let studentCId: string;
@@ -62,6 +64,12 @@ describe("results.service (integration)", () => {
       .returning();
     await db.insert(teachers).values({ userId: teacher.id });
     teacherId = teacher.id;
+    requester = {
+      id: teacher.id,
+      email: teacher.email,
+      name: teacher.name,
+      role: "teacher",
+    };
     userIds.push(teacher.id);
 
     async function makeStudent(label: string) {
@@ -128,8 +136,8 @@ describe("results.service (integration)", () => {
       teacherId,
     );
     quizId = quiz.id;
-    await setQuizQuestionPool(quizId, [question.id]);
-    await publishQuiz(quizId);
+    await setQuizQuestionPool(quizId, [question.id], requester);
+    await publishQuiz(quizId, requester);
     await createAssignment(quizId, { classId }, teacherId);
 
     // Student A: answers correctly and submits (100%, passed).

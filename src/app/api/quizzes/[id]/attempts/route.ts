@@ -5,15 +5,17 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { requireApiUser } from "@/backend/auth/rbac";
 import { startAttempt } from "@/backend/attempts/attempt.service";
 import { listAttemptsForQuiz } from "@/backend/monitoring/monitoring.service";
+import { getQuiz } from "@/backend/quizzes/quiz.service";
 
 export async function GET(
   _request: Request,
   ctx: RouteContext<"/api/quizzes/[id]/attempts">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
+    await getQuiz(id, user);
     const attempts = await listAttemptsForQuiz(id);
 
     return NextResponse.json({ attempts });

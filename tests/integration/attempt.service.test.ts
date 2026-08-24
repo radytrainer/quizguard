@@ -12,6 +12,7 @@ import {
   submitAttempt,
 } from "@/backend/attempts/attempt.service";
 import { hashPassword } from "@/backend/auth/password";
+import type { AuthUser } from "@/backend/auth/session";
 import {
   recordViolation,
   unlockAttempt,
@@ -41,6 +42,7 @@ describe("attempt.service + answer.service (integration)", () => {
   const suffix = randomUUID().slice(0, 8);
   const userIds: string[] = [];
   let teacherId: string;
+  let requester: AuthUser;
   let studentId: string;
   let outsiderStudentId: string;
   let classId: string;
@@ -64,6 +66,12 @@ describe("attempt.service + answer.service (integration)", () => {
       .returning();
     await db.insert(teachers).values({ userId: teacher.id });
     teacherId = teacher.id;
+    requester = {
+      id: teacher.id,
+      email: teacher.email,
+      name: teacher.name,
+      role: "teacher",
+    };
     userIds.push(teacher.id);
 
     const [student] = await db
@@ -151,8 +159,8 @@ describe("attempt.service + answer.service (integration)", () => {
       teacherId,
     );
     quizId = quiz.id;
-    await setQuizQuestionPool(quizId, [mcQuestionId, saQuestionId]);
-    await publishQuiz(quizId);
+    await setQuizQuestionPool(quizId, [mcQuestionId, saQuestionId], requester);
+    await publishQuiz(quizId, requester);
     await createAssignment(quizId, { classId }, teacherId);
   });
 
@@ -290,8 +298,8 @@ describe("attempt.service + answer.service (integration)", () => {
       },
       teacherId,
     );
-    await setQuizQuestionPool(oneShotQuiz.id, [mcQuestionId]);
-    await publishQuiz(oneShotQuiz.id);
+    await setQuizQuestionPool(oneShotQuiz.id, [mcQuestionId], requester);
+    await publishQuiz(oneShotQuiz.id, requester);
     await createAssignment(oneShotQuiz.id, { classId }, teacherId);
 
     const attempt = await startAttempt(oneShotQuiz.id, studentId);
@@ -325,8 +333,8 @@ describe("attempt.service + answer.service (integration)", () => {
       },
       teacherId,
     );
-    await setQuizQuestionPool(shortQuiz.id, [mcQuestionId]);
-    await publishQuiz(shortQuiz.id);
+    await setQuizQuestionPool(shortQuiz.id, [mcQuestionId], requester);
+    await publishQuiz(shortQuiz.id, requester);
     await createAssignment(shortQuiz.id, { classId }, teacherId);
 
     const attempt = await startAttempt(shortQuiz.id, studentId);
@@ -375,8 +383,8 @@ describe("attempt.service + answer.service (integration)", () => {
       },
       teacherId,
     );
-    await setQuizQuestionPool(lockQuiz.id, [mcQuestionId]);
-    await publishQuiz(lockQuiz.id);
+    await setQuizQuestionPool(lockQuiz.id, [mcQuestionId], requester);
+    await publishQuiz(lockQuiz.id, requester);
     await createAssignment(lockQuiz.id, { classId }, teacherId);
 
     const attempt = await startAttempt(lockQuiz.id, studentId);

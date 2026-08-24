@@ -15,6 +15,7 @@ import {
   users,
 } from "@/database/schema";
 import { hashPassword } from "@/backend/auth/password";
+import type { AuthUser } from "@/backend/auth/session";
 import type { QuestionInput } from "@/backend/questions/question.schema";
 import { createQuestion } from "@/backend/questions/question.service";
 import {
@@ -34,6 +35,7 @@ describe("assignment.service (integration)", () => {
   const suffix = randomUUID().slice(0, 8);
   const userIds: string[] = [];
   let teacherId: string;
+  let requester: AuthUser;
   let classId: string;
   let classStudentId: string;
   let directStudentId: string;
@@ -54,6 +56,12 @@ describe("assignment.service (integration)", () => {
       .returning();
     await db.insert(teachers).values({ userId: teacher.id });
     teacherId = teacher.id;
+    requester = {
+      id: teacher.id,
+      email: teacher.email,
+      name: teacher.name,
+      role: "teacher",
+    };
     userIds.push(teacher.id);
 
     const [studentInClass] = await db
@@ -120,8 +128,8 @@ describe("assignment.service (integration)", () => {
       },
       teacherId,
     );
-    await setQuizQuestionPool(publishedQuiz.id, [question.id]);
-    await publishQuiz(publishedQuiz.id);
+    await setQuizQuestionPool(publishedQuiz.id, [question.id], requester);
+    await publishQuiz(publishedQuiz.id, requester);
     publishedQuizId = publishedQuiz.id;
 
     const draftQuiz = await createQuiz(

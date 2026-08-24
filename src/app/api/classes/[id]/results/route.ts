@@ -10,10 +10,10 @@ export async function GET(
   ctx: RouteContext<"/api/classes/[id]/results">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    await getClass(id);
+    await getClass(id, user);
     const results = await getClassResults(id);
 
     return NextResponse.json({ results });

@@ -10,10 +10,10 @@ export async function GET(
   ctx: RouteContext<"/api/classes/[id]/students">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    const roster = await listRoster(id);
+    const roster = await listRoster(id, user);
 
     return NextResponse.json({ roster });
   } catch (error) {
@@ -26,12 +26,12 @@ export async function POST(
   ctx: RouteContext<"/api/classes/[id]/students">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
     const { studentId } = rosterAddSchema.parse(await request.json());
-    await addStudentToClass(id, studentId);
-    const roster = await listRoster(id);
+    await addStudentToClass(id, studentId, user);
+    const roster = await listRoster(id, user);
 
     return NextResponse.json({ roster }, { status: 201 });
   } catch (error) {

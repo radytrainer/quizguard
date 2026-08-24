@@ -26,7 +26,10 @@ import {
   type Quiz,
   type QuizStatus,
 } from "@/database/schema";
+import type { AuthUser } from "@/backend/auth/session";
+import { verifyQuestionsOwnedBy } from "@/backend/questions/question.service";
 import type { QuizInput, QuizListQuery } from "@/backend/quizzes/quiz.schema";
+import { assertOwner } from "@/backend/shared/ownership";
 
 export interface QuizWithPoolInfo extends Quiz {
   questionCount: number;
@@ -110,6 +113,15 @@ async function requireActiveQuiz(id: string): Promise<Quiz> {
   return quiz;
 }
 
+async function requireOwnedQuiz(
+  id: string,
+  requester: AuthUser,
+): Promise<Quiz> {
+  const quiz = await requireActiveQuiz(id);
+  assertOwner(quiz.createdBy, requester, "This quiz does not belong to you");
+  return quiz;
+}
+
 export async function createQuiz(
   input: QuizInput,
   authorId: string,
@@ -121,8 +133,11 @@ export async function createQuiz(
   return quiz;
 }
 
-export async function getQuiz(id: string): Promise<QuizWithPoolInfo> {
-  const quiz = await requireActiveQuiz(id);
+export async function getQuiz(
+  id: string,
+  requester: AuthUser,
+): Promise<QuizWithPoolInfo> {
+  const quiz = await requireOwnedQuiz(id, requester);
 
   const [{ questionCount }] = await db
     .select({ questionCount: count() })
@@ -132,8 +147,12 @@ export async function getQuiz(id: string): Promise<QuizWithPoolInfo> {
   return { ...quiz, questionCount };
 }
 
-export async function updateQuiz(id: string, input: QuizInput): Promise<Quiz> {
-  await requireActiveQuiz(id);
+export async function updateQuiz(
+  id: string,
+  input: QuizInput,
+  requester: AuthUser,
+): Promise<Quiz> {
+  await requireOwnedQuiz(id, requester);
 
   const [quiz] = await db
     .update(quizzes)
@@ -144,16 +163,23 @@ export async function updateQuiz(id: string, input: QuizInput): Promise<Quiz> {
   return quiz;
 }
 
-export async function deleteQuiz(id: string): Promise<void> {
-  await requireActiveQuiz(id);
+export async function deleteQuiz(
+  id: string,
+  requester: AuthUser,
+): Promise<void> {
+  await requireOwnedQuiz(id, requester);
   await db
     .update(quizzes)
     .set({ deletedAt: new Date() })
     .where(eq(quizzes.id, id));
 }
 
-async function setQuizStatus(id: string, status: QuizStatus): Promise<Quiz> {
-  await requireActiveQuiz(id);
+async function setQuizStatus(
+  id: string,
+  status: QuizStatus,
+  requester: AuthUser,
+): Promise<Quiz> {
+  await requireOwnedQuiz(id, requester);
 
   const [quiz] = await db
     .update(quizzes)
@@ -164,8 +190,11 @@ async function setQuizStatus(id: string, status: QuizStatus): Promise<Quiz> {
   return quiz;
 }
 
-export async function publishQuiz(id: string): Promise<Quiz> {
-  const quiz = await requireActiveQuiz(id);
+export async function publishQuiz(
+  id: string,
+  requester: AuthUser,
+): Promise<Quiz> {
+  const quiz = await requireOwnedQuiz(id, requester);
 
   const [{ questionCount }] = await db
     .select({ questionCount: count() })
@@ -181,22 +210,28 @@ export async function publishQuiz(id: string): Promise<Quiz> {
     );
   }
 
-  return setQuizStatus(id, "published");
+  return setQuizStatus(id, "published", requester);
 }
 
-export async function unpublishQuiz(id: string): Promise<Quiz> {
-  return setQuizStatus(id, "draft");
+export async function unpublishQuiz(
+  id: string,
+  requester: AuthUser,
+): Promise<Quiz> {
+  return setQuizStatus(id, "draft", requester);
 }
 
-export async function archiveQuiz(id: string): Promise<Quiz> {
-  return setQuizStatus(id, "archived");
+export async function archiveQuiz(
+  id: string,
+  requester: AuthUser,
+): Promise<Quiz> {
+  return setQuizStatus(id, "archived", requester);
 }
 
 export async function duplicateQuiz(
   id: string,
-  authorId: string,
+  requester: AuthUser,
 ): Promise<Quiz> {
-  const original = await requireActiveQuiz(id);
+  const original = await requireOwnedQuiz(id, requester);
   const pool = await db
     .select({
       questionId: quizQuestions.questionId,
@@ -227,7 +262,7 @@ export async function duplicateQuiz(
           showResults: original.showResults,
           questionsPerAttempt: original.questionsPerAttempt,
         }),
-        createdBy: authorId,
+        createdBy: requester.id,
       })
       .returning();
 
@@ -248,8 +283,12 @@ export async function duplicateQuiz(
 export async function setQuizQuestionPool(
   quizId: string,
   questionIds: string[],
+  requester: AuthUser,
 ): Promise<void> {
-  await requireActiveQuiz(quizId);
+  await requireOwnedQuiz(quizId, requester);
+  if (requester.role !== "admin") {
+    await verifyQuestionsOwnedBy(questionIds, requester.id);
+  }
 
   await db.transaction(async (tx) => {
     await tx.delete(quizQuestions).where(eq(quizQuestions.quizId, quizId));
@@ -267,7 +306,10 @@ export async function setQuizQuestionPool(
 
 export async function getQuizQuestionPool(
   quizId: string,
+  requester: AuthUser,
 ): Promise<PooledQuestion[]> {
+  await requireOwnedQuiz(quizId, requester);
+
   return db
     .select({
       id: questions.id,
@@ -285,12 +327,35 @@ export async function getQuizQuestionPool(
     .orderBy(quizQuestions.position);
 }
 
-export async function getQuizFilterFacets(): Promise<{ subjects: string[] }> {
+export async function getQuizFilterFacets(
+  requester: AuthUser,
+): Promise<{ subjects: string[] }> {
+  const conditions = [isNull(quizzes.deletedAt)];
+  if (requester.role !== "admin") {
+    conditions.push(eq(quizzes.createdBy, requester.id));
+  }
+
   const rows = await db
     .selectDistinct({ subject: quizzes.subject })
     .from(quizzes)
-    .where(isNull(quizzes.deletedAt));
+    .where(and(...conditions));
   return { subjects: rows.map((r) => r.subject).sort() };
+}
+
+/** The one deliberately ownerless read: guest live-game join pages (`/play/[sessionId]`) show
+ * the quiz's title to an anonymous visitor before they've even entered a name, so there's no
+ * teacher/student identity yet to scope against. Returns only the title — never route this
+ * through anything that also exposes settings, the question pool, or results. */
+export async function getQuizTitle(
+  id: string,
+): Promise<{ id: string; title: string }> {
+  const [quiz] = await db
+    .select({ id: quizzes.id, title: quizzes.title })
+    .from(quizzes)
+    .where(and(eq(quizzes.id, id), isNull(quizzes.deletedAt)))
+    .limit(1);
+  if (!quiz) throw notFound("Quiz not found");
+  return quiz;
 }
 
 /** Distinct students reachable through a set of quizzes' assignments — the union of each
@@ -368,8 +433,12 @@ async function joinedCountsByQuiz(
 
 export async function listQuizzes(
   query: QuizListQuery,
+  requester: AuthUser,
 ): Promise<QuizListResult> {
   const conditions = [isNull(quizzes.deletedAt)];
+  if (requester.role !== "admin") {
+    conditions.push(eq(quizzes.createdBy, requester.id));
+  }
 
   if (query.search) conditions.push(ilike(quizzes.title, `%${query.search}%`));
   if (query.subject) conditions.push(eq(quizzes.subject, query.subject));

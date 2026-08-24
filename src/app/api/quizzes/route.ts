@@ -10,12 +10,12 @@ import { createQuiz, listQuizzes } from "@/backend/quizzes/quiz.service";
 
 export async function GET(request: NextRequest) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const query = quizListQuerySchema.parse(
       Object.fromEntries(request.nextUrl.searchParams),
     );
-    const result = await listQuizzes(query);
+    const result = await listQuizzes(query, user);
 
     return NextResponse.json(result);
   } catch (error) {

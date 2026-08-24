@@ -14,10 +14,10 @@ export async function GET(
   ctx: RouteContext<"/api/classes/[id]">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    const item = await getClass(id);
+    const item = await getClass(id, user);
 
     return NextResponse.json({ class: item });
   } catch (error) {
@@ -30,11 +30,11 @@ export async function PATCH(
   ctx: RouteContext<"/api/classes/[id]">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
     const input = classInputSchema.parse(await request.json());
-    const item = await updateClass(id, input);
+    const item = await updateClass(id, input, user);
 
     return NextResponse.json({ class: item });
   } catch (error) {
@@ -47,10 +47,10 @@ export async function DELETE(
   ctx: RouteContext<"/api/classes/[id]">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
-    await deleteClass(id);
+    await deleteClass(id, user);
 
     return NextResponse.json({ success: true });
   } catch (error) {

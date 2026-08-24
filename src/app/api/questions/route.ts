@@ -15,12 +15,12 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const query = questionListQuerySchema.parse(
       Object.fromEntries(request.nextUrl.searchParams),
     );
-    const result = await listQuestions(query);
+    const result = await listQuestions(query, user);
 
     return NextResponse.json(result);
   } catch (error) {
@@ -43,10 +43,10 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { ids } = bulkDeleteQuestionsSchema.parse(await request.json());
-    const deletedCount = await deleteQuestions(ids);
+    const deletedCount = await deleteQuestions(ids, user);
 
     return NextResponse.json({ deletedCount });
   } catch (error) {

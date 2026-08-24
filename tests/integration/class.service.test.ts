@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/lib/db";
 import { classes, students, teachers, users } from "@/database/schema";
 import { hashPassword } from "@/backend/auth/password";
+import type { AuthUser } from "@/backend/auth/session";
 import {
   addStudentToClass,
   createClass,
@@ -25,6 +26,7 @@ describe("class.service (integration)", () => {
   let teacherId: string;
   let studentAId: string;
   let studentBId: string;
+  let requester: AuthUser;
 
   beforeAll(async () => {
     const passwordHash = await hashPassword("irrelevant");
@@ -41,6 +43,12 @@ describe("class.service (integration)", () => {
     await db.insert(teachers).values({ userId: teacher.id });
     teacherId = teacher.id;
     userIds.push(teacher.id);
+    requester = {
+      id: teacher.id,
+      email: teacher.email,
+      name: teacher.name,
+      role: "teacher",
+    };
 
     const [studentA] = await db
       .insert(users)
@@ -90,11 +98,11 @@ describe("class.service (integration)", () => {
       { name: `Roster Count ${suffix}` },
       teacherId,
     );
-    const before = await getClass(cls.id);
+    const before = await getClass(cls.id, requester);
     expect(before.studentCount).toBe(0);
 
-    await addStudentToClass(cls.id, studentAId);
-    const after = await getClass(cls.id);
+    await addStudentToClass(cls.id, studentAId, requester);
+    const after = await getClass(cls.id, requester);
     expect(after.studentCount).toBe(1);
   });
 
@@ -103,16 +111,22 @@ describe("class.service (integration)", () => {
       { name: `Rename Before ${suffix}` },
       teacherId,
     );
-    const updated = await updateClass(cls.id, {
-      name: `Rename After ${suffix}`,
-    });
+    const updated = await updateClass(
+      cls.id,
+      {
+        name: `Rename After ${suffix}`,
+      },
+      requester,
+    );
     expect(updated.name).toBe(`Rename After ${suffix}`);
   });
 
   it("soft-deletes: getClass 404s afterward", async () => {
     const cls = await createClass({ name: `Delete Me ${suffix}` }, teacherId);
-    await deleteClass(cls.id);
-    await expect(getClass(cls.id)).rejects.toMatchObject({ status: 404 });
+    await deleteClass(cls.id, requester);
+    await expect(getClass(cls.id, requester)).rejects.toMatchObject({
+      status: 404,
+    });
   });
 
   it("filters listClasses by search", async () => {
@@ -120,11 +134,14 @@ describe("class.service (integration)", () => {
       { name: `Findable Class ${suffix}` },
       teacherId,
     );
-    const result = await listClasses({
-      search: `Findable Class ${suffix}`,
-      page: 1,
-      pageSize: 20,
-    });
+    const result = await listClasses(
+      {
+        search: `Findable Class ${suffix}`,
+        page: 1,
+        pageSize: 20,
+      },
+      requester,
+    );
     expect(result.items).toHaveLength(1);
     expect(result.items[0].id).toBe(cls.id);
   });
@@ -132,25 +149,27 @@ describe("class.service (integration)", () => {
   it("adds, lists, and removes roster members", async () => {
     const cls = await createClass({ name: `Roster Ops ${suffix}` }, teacherId);
 
-    await addStudentToClass(cls.id, studentAId);
-    await addStudentToClass(cls.id, studentBId);
+    await addStudentToClass(cls.id, studentAId, requester);
+    await addStudentToClass(cls.id, studentBId, requester);
 
-    const roster = await listRoster(cls.id);
+    const roster = await listRoster(cls.id, requester);
     expect(roster.map((r) => r.studentId).sort()).toEqual(
       [studentAId, studentBId].sort(),
     );
 
-    await removeStudentFromClass(cls.id, studentAId);
-    const afterRemove = await listRoster(cls.id);
+    await removeStudentFromClass(cls.id, studentAId, requester);
+    const afterRemove = await listRoster(cls.id, requester);
     expect(afterRemove).toHaveLength(1);
     expect(afterRemove[0].studentId).toBe(studentBId);
   });
 
   it("rejects enrolling the same student twice", async () => {
     const cls = await createClass({ name: `Dup Enroll ${suffix}` }, teacherId);
-    await addStudentToClass(cls.id, studentAId);
+    await addStudentToClass(cls.id, studentAId, requester);
 
-    await expect(addStudentToClass(cls.id, studentAId)).rejects.toMatchObject({
+    await expect(
+      addStudentToClass(cls.id, studentAId, requester),
+    ).rejects.toMatchObject({
       status: 409,
     });
   });
@@ -161,15 +180,15 @@ describe("class.service (integration)", () => {
       teacherId,
     );
     await expect(
-      removeStudentFromClass(cls.id, studentAId),
+      removeStudentFromClass(cls.id, studentAId, requester),
     ).rejects.toMatchObject({ status: 404 });
   });
 
   it("excludes already-enrolled students from searchAvailableStudents", async () => {
     const cls = await createClass({ name: `Available ${suffix}` }, teacherId);
-    await addStudentToClass(cls.id, studentAId);
+    await addStudentToClass(cls.id, studentAId, requester);
 
-    const available = await searchAvailableStudents(cls.id, suffix);
+    const available = await searchAvailableStudents(cls.id, suffix, requester);
     expect(available.some((s) => s.studentId === studentAId)).toBe(false);
     expect(available.some((s) => s.studentId === studentBId)).toBe(true);
   });

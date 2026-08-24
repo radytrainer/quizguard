@@ -66,8 +66,8 @@ export default async function AdminPage() {
     [
       listUsers({ role: "teacher", page: 1, pageSize: 1 }),
       listUsers({ role: "student", page: 1, pageSize: 1 }),
-      listQuizzes({ page: 1, pageSize: 1 }),
-      listClasses({ page: 1, pageSize: 1 }),
+      listQuizzes({ page: 1, pageSize: 1 }, user),
+      listClasses({ page: 1, pageSize: 1 }, user),
       listUsers({ page: 1, pageSize: 5 }),
     ],
   );

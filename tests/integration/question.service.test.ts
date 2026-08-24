@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/lib/db";
 import { questions, users } from "@/database/schema";
 import { hashPassword } from "@/backend/auth/password";
+import type { AuthUser } from "@/backend/auth/session";
 import {
   createQuestion,
   deleteQuestion,
@@ -22,6 +23,7 @@ describe("question.service (integration)", () => {
   const suffix = randomUUID().slice(0, 8);
   const authorEmail = `question-service-author-${suffix}@quizguard.test`;
   let authorId: string;
+  let requester: AuthUser;
 
   beforeAll(async () => {
     const passwordHash = await hashPassword("irrelevant");
@@ -35,6 +37,12 @@ describe("question.service (integration)", () => {
       })
       .returning();
     authorId = author.id;
+    requester = {
+      id: author.id,
+      email: author.email,
+      name: author.name,
+      role: "teacher",
+    };
   });
 
   afterAll(async () => {
@@ -69,7 +77,7 @@ describe("question.service (integration)", () => {
 
   it("round-trips through getQuestion with options in position order", async () => {
     const created = await createQuestion(multipleChoiceInput, authorId);
-    const fetched = await getQuestion(created.id);
+    const fetched = await getQuestion(created.id, requester);
 
     expect(fetched.id).toBe(created.id);
     expect(fetched.options.map((o) => o.text)).toEqual(
@@ -97,13 +105,17 @@ describe("question.service (integration)", () => {
   it("replaces all options on update rather than merging", async () => {
     const created = await createQuestion(multipleChoiceInput, authorId);
 
-    const updated = await updateQuestion(created.id, {
-      ...multipleChoiceInput,
-      options: [
-        { text: "Only option now", isCorrect: true },
-        { text: "Distractor", isCorrect: false },
-      ],
-    });
+    const updated = await updateQuestion(
+      created.id,
+      {
+        ...multipleChoiceInput,
+        options: [
+          { text: "Only option now", isCorrect: true },
+          { text: "Distractor", isCorrect: false },
+        ],
+      },
+      requester,
+    );
 
     expect(updated.options).toHaveLength(2);
     expect(updated.options.map((o) => o.text)).toEqual([
@@ -115,9 +127,9 @@ describe("question.service (integration)", () => {
   it("soft-deletes: getQuestion 404s afterward, row still exists in the DB", async () => {
     const created = await createQuestion(multipleChoiceInput, authorId);
 
-    await deleteQuestion(created.id);
+    await deleteQuestion(created.id, requester);
 
-    await expect(getQuestion(created.id)).rejects.toMatchObject({
+    await expect(getQuestion(created.id, requester)).rejects.toMatchObject({
       status: 404,
     });
 
@@ -130,39 +142,43 @@ describe("question.service (integration)", () => {
   });
 
   it("404s deleting a question that doesn't exist", async () => {
-    await expect(deleteQuestion(randomUUID())).rejects.toMatchObject({
-      status: 404,
-      code: "NOT_FOUND",
-    });
+    await expect(deleteQuestion(randomUUID(), requester)).rejects.toMatchObject(
+      {
+        status: 404,
+        code: "NOT_FOUND",
+      },
+    );
   });
 
   it("bulk-deletes multiple questions in one call and reports how many", async () => {
     const first = await createQuestion(multipleChoiceInput, authorId);
     const second = await createQuestion(multipleChoiceInput, authorId);
 
-    const deletedCount = await deleteQuestions([first.id, second.id]);
+    const deletedCount = await deleteQuestions(
+      [first.id, second.id],
+      requester,
+    );
     expect(deletedCount).toBe(2);
 
-    await expect(getQuestion(first.id)).rejects.toMatchObject({
+    await expect(getQuestion(first.id, requester)).rejects.toMatchObject({
       status: 404,
     });
-    await expect(getQuestion(second.id)).rejects.toMatchObject({
+    await expect(getQuestion(second.id, requester)).rejects.toMatchObject({
       status: 404,
     });
   });
 
   it("bulk-delete silently skips ids that are already deleted or don't exist", async () => {
     const created = await createQuestion(multipleChoiceInput, authorId);
-    await deleteQuestion(created.id);
+    await deleteQuestion(created.id, requester);
 
     // Mixes an already-deleted id, a nonexistent id, and one real, currently-active id — only
     // the last should actually count, and none of it should throw.
     const stillActive = await createQuestion(multipleChoiceInput, authorId);
-    const deletedCount = await deleteQuestions([
-      created.id,
-      randomUUID(),
-      stillActive.id,
-    ]);
+    const deletedCount = await deleteQuestions(
+      [created.id, randomUUID(), stillActive.id],
+      requester,
+    );
     expect(deletedCount).toBe(1);
   });
 
@@ -173,27 +189,36 @@ describe("question.service (integration)", () => {
       authorId,
     );
 
-    const bySubject = await listQuestions({
-      subject: multipleChoiceInput.subject,
-      page: 1,
-      pageSize: 50,
-    });
+    const bySubject = await listQuestions(
+      {
+        subject: multipleChoiceInput.subject,
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(bySubject.total).toBeGreaterThanOrEqual(2);
 
-    const byDifficulty = await listQuestions({
-      subject: multipleChoiceInput.subject,
-      difficulty: "hard",
-      page: 1,
-      pageSize: 50,
-    });
+    const byDifficulty = await listQuestions(
+      {
+        subject: multipleChoiceInput.subject,
+        difficulty: "hard",
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(byDifficulty.items.every((q) => q.difficulty === "hard")).toBe(true);
 
-    const byTag = await listQuestions({
-      subject: multipleChoiceInput.subject,
-      tag: "indexes",
-      page: 1,
-      pageSize: 50,
-    });
+    const byTag = await listQuestions(
+      {
+        subject: multipleChoiceInput.subject,
+        tag: "indexes",
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
     expect(byTag.items.length).toBeGreaterThanOrEqual(1);
     expect(byTag.items.every((q) => q.tags.includes("indexes"))).toBe(true);
   });
@@ -201,11 +226,14 @@ describe("question.service (integration)", () => {
   it("search matches question text case-insensitively", async () => {
     await createQuestion(multipleChoiceInput, authorId);
 
-    const result = await listQuestions({
-      search: "rollback",
-      page: 1,
-      pageSize: 50,
-    });
+    const result = await listQuestions(
+      {
+        search: "rollback",
+        page: 1,
+        pageSize: 50,
+      },
+      requester,
+    );
 
     expect(
       result.items.some((q) => q.text.toLowerCase().includes("rollback")),
@@ -214,13 +242,16 @@ describe("question.service (integration)", () => {
 
   it("excludes soft-deleted questions from list results", async () => {
     const created = await createQuestion(multipleChoiceInput, authorId);
-    await deleteQuestion(created.id);
+    await deleteQuestion(created.id, requester);
 
-    const result = await listQuestions({
-      subject: multipleChoiceInput.subject,
-      page: 1,
-      pageSize: 100,
-    });
+    const result = await listQuestions(
+      {
+        subject: multipleChoiceInput.subject,
+        page: 1,
+        pageSize: 100,
+      },
+      requester,
+    );
 
     expect(result.items.some((q) => q.id === created.id)).toBe(false);
   });
@@ -228,7 +259,7 @@ describe("question.service (integration)", () => {
   it("returns distinct subjects/categories for filter facets", async () => {
     await createQuestion(multipleChoiceInput, authorId);
 
-    const facets = await getQuestionFilterFacets();
+    const facets = await getQuestionFilterFacets(requester);
 
     expect(facets.subjects).toContain(multipleChoiceInput.subject);
     expect(facets.categories).toContain("Transactions");

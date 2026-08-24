@@ -10,12 +10,12 @@ import { createClass, listClasses } from "@/backend/classes/class.service";
 
 export async function GET(request: NextRequest) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const query = classListQuerySchema.parse(
       Object.fromEntries(request.nextUrl.searchParams),
     );
-    const result = await listClasses(query);
+    const result = await listClasses(query, user);
 
     return NextResponse.json(result);
   } catch (error) {

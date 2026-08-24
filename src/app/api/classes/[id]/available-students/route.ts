@@ -9,11 +9,11 @@ export async function GET(
   ctx: RouteContext<"/api/classes/[id]/available-students">,
 ) {
   try {
-    await requireApiUser(["admin", "teacher"]);
+    const user = await requireApiUser(["admin", "teacher"]);
 
     const { id } = await ctx.params;
     const search = request.nextUrl.searchParams.get("search") ?? undefined;
-    const students = await searchAvailableStudents(id, search);
+    const students = await searchAvailableStudents(id, search, user);
 
     return NextResponse.json({ students });
   } catch (error) {

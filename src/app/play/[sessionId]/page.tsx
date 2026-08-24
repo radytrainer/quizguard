@@ -4,7 +4,7 @@ import { Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { requireSession } from "@/backend/live/live.service";
-import { getQuiz } from "@/backend/quizzes/quiz.service";
+import { getQuizTitle } from "@/backend/quizzes/quiz.service";
 import { GuestLiveEntry } from "@/features/live/guest-live-entry";
 import { ApiError } from "@/lib/api-response";
 
@@ -34,8 +34,8 @@ export default async function PlaySessionPage({
           </div>
           <p className="font-medium">This game requires an account.</p>
           <p className="text-muted-foreground text-sm">
-            The host restricted this game to a specific class. Log in with
-            your student account to join.
+            The host restricted this game to a specific class. Log in with your
+            student account to join.
           </p>
           <Button asChild>
             <Link href="/login">Log in</Link>
@@ -45,7 +45,7 @@ export default async function PlaySessionPage({
     );
   }
 
-  const quiz = await getQuiz(session.quizId);
+  const quiz = await getQuizTitle(session.quizId);
 
   return (
     <main className="flex flex-1 items-center justify-center p-4 sm:p-6 lg:p-8">
