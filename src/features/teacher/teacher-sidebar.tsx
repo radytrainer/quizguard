@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   LayoutDashboard,
-  PanelLeftClose,
-  PanelLeftOpen,
   Radio,
   ShieldCheck,
   Upload,
@@ -123,12 +123,12 @@ export function TeacherSidebar({
             type="button"
             onClick={onToggleCollapse}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="text-muted-foreground hover:bg-secondary hover:text-foreground hidden shrink-0 rounded-md p-1.5 transition-colors lg:block"
+            className="border-outline-variant text-muted-foreground hover:bg-secondary hover:text-foreground hidden size-8 shrink-0 items-center justify-center rounded-md border transition-colors lg:flex"
           >
             {collapsed ? (
-              <PanelLeftOpen className="size-5" />
+              <ChevronRight className="size-4" />
             ) : (
-              <PanelLeftClose className="size-5" />
+              <ChevronLeft className="size-4" />
             )}
           </button>
         </div>
