@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
   Clock,
   Eye,
+  EyeOff,
   Flag,
   Lock,
   Maximize,
@@ -588,240 +588,258 @@ export function ExamAttempt({
         </Card>
       )}
 
-      {!lockedActive && !fullscreenGateActive && currentQuestion && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_260px]">
-          <div className="flex flex-col gap-4">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-                    Question {safeIndex + 1} of {totalQuestions}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant="outline"
-                      className={
-                        isAnswered(currentQuestion.questionId)
-                          ? "border-success/30 bg-success/10 text-success"
-                          : "text-muted-foreground"
-                      }
-                    >
-                      {isAnswered(currentQuestion.questionId)
-                        ? "Answered"
-                        : "Unanswered"}
-                    </Badge>
-                    <Badge variant="outline">{currentQuestion.points} pt</Badge>
-                    {inProgress && (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={
-                          flagged.has(currentQuestion.questionId)
-                            ? "Unflag this question"
-                            : "Flag this question for review"
+      {!lockedActive &&
+        !fullscreenGateActive &&
+        currentQuestion &&
+        (inProgress || attempt.reviewAvailable) && (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_260px]">
+            <div className="flex flex-col gap-4">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+                      Question {safeIndex + 1} of {totalQuestions}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={
+                          isAnswered(currentQuestion.questionId)
+                            ? "border-success/30 bg-success/10 text-success"
+                            : "text-muted-foreground"
                         }
-                        onClick={() => toggleFlag(currentQuestion.questionId)}
                       >
-                        <Flag
-                          className={cn(
-                            "size-4",
+                        {isAnswered(currentQuestion.questionId)
+                          ? "Answered"
+                          : "Unanswered"}
+                      </Badge>
+                      <Badge variant="outline">
+                        {currentQuestion.points} pt
+                      </Badge>
+                      {inProgress && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={
                             flagged.has(currentQuestion.questionId)
-                              ? "fill-destructive text-destructive"
-                              : "text-muted-foreground",
-                          )}
-                        />
-                      </Button>
-                    )}
+                              ? "Unflag this question"
+                              : "Flag this question for review"
+                          }
+                          onClick={() => toggleFlag(currentQuestion.questionId)}
+                        >
+                          <Flag
+                            className={cn(
+                              "size-4",
+                              flagged.has(currentQuestion.questionId)
+                                ? "fill-destructive text-destructive"
+                                : "text-muted-foreground",
+                            )}
+                          />
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <CardTitle className="mt-2 text-base font-normal">
-                  {currentQuestion.text}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isChoice && (
-                  <RadioGroup
-                    value={selectedIds[0] ?? ""}
-                    onValueChange={(value) =>
-                      handleChoiceChange(currentQuestion.questionId, value)
-                    }
-                    className="gap-2"
+                  <CardTitle className="mt-2 text-base font-normal">
+                    {currentQuestion.text}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {isChoice && (
+                    <RadioGroup
+                      value={selectedIds[0] ?? ""}
+                      onValueChange={(value) =>
+                        handleChoiceChange(currentQuestion.questionId, value)
+                      }
+                      className="gap-2"
+                    >
+                      {currentQuestion.options.map((option) => {
+                        const checked = selectedIds.includes(option.id);
+                        const showCorrectness = attempt.reviewAvailable;
+                        return (
+                          <label
+                            key={option.id}
+                            className={cn(
+                              "border-outline-variant flex items-center gap-3 rounded-lg border p-3 text-sm",
+                              showCorrectness &&
+                                option.isCorrect &&
+                                "border-success/40 bg-success/5",
+                              showCorrectness &&
+                                !option.isCorrect &&
+                                checked &&
+                                "border-destructive/40 bg-destructive/5",
+                            )}
+                          >
+                            <RadioGroupItem
+                              value={option.id}
+                              disabled={!inProgress}
+                            />
+                            <span className="flex-1">{option.text}</span>
+                            {showCorrectness && option.isCorrect && (
+                              <CheckCircle2 className="text-success size-4 shrink-0" />
+                            )}
+                          </label>
+                        );
+                      })}
+                    </RadioGroup>
+                  )}
+                  {isMulti && (
+                    <div className="flex flex-col gap-2">
+                      {currentQuestion.options.map((option) => {
+                        const checked = selectedIds.includes(option.id);
+                        const showCorrectness = attempt.reviewAvailable;
+                        return (
+                          <label
+                            key={option.id}
+                            className={cn(
+                              "border-outline-variant flex items-center gap-3 rounded-lg border p-3 text-sm",
+                              showCorrectness &&
+                                option.isCorrect &&
+                                "border-success/40 bg-success/5",
+                              showCorrectness &&
+                                !option.isCorrect &&
+                                checked &&
+                                "border-destructive/40 bg-destructive/5",
+                            )}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              disabled={!inProgress}
+                              onCheckedChange={(value) =>
+                                handleMultiChange(
+                                  currentQuestion.questionId,
+                                  option.id,
+                                  value === true,
+                                )
+                              }
+                            />
+                            <span className="flex-1">{option.text}</span>
+                            {showCorrectness && option.isCorrect && (
+                              <CheckCircle2 className="text-success size-4 shrink-0" />
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {isText && (
+                    <Input
+                      value={textValue}
+                      disabled={!inProgress}
+                      onChange={(e) =>
+                        handleTextChange(
+                          currentQuestion.questionId,
+                          e.target.value,
+                        )
+                      }
+                      placeholder="Type your answer..."
+                    />
+                  )}
+                </CardContent>
+              </Card>
+
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="ghost"
+                  disabled={safeIndex === 0}
+                  onClick={() => setCurrentIndex((i) => i - 1)}
+                >
+                  <ArrowLeft className="size-4" />
+                  Previous
+                </Button>
+                {inProgress && isLastQuestion ? (
+                  <Button onClick={handleSubmitClick} disabled={submitting}>
+                    {submitting ? "Submitting…" : "Submit"}
+                  </Button>
+                ) : (
+                  <Button
+                    disabled={isLastQuestion}
+                    onClick={() => setCurrentIndex((i) => i + 1)}
                   >
-                    {currentQuestion.options.map((option) => {
-                      const checked = selectedIds.includes(option.id);
-                      const showCorrectness = attempt.reviewAvailable;
-                      return (
-                        <label
-                          key={option.id}
-                          className={cn(
-                            "border-outline-variant flex items-center gap-3 rounded-lg border p-3 text-sm",
-                            showCorrectness &&
-                              option.isCorrect &&
-                              "border-success/40 bg-success/5",
-                            showCorrectness &&
-                              !option.isCorrect &&
-                              checked &&
-                              "border-destructive/40 bg-destructive/5",
-                          )}
-                        >
-                          <RadioGroupItem
-                            value={option.id}
-                            disabled={!inProgress}
-                          />
-                          <span className="flex-1">{option.text}</span>
-                          {showCorrectness && option.isCorrect && (
-                            <CheckCircle2 className="text-success size-4 shrink-0" />
-                          )}
-                        </label>
-                      );
-                    })}
-                  </RadioGroup>
+                    Next Question
+                    <ArrowRight className="size-4" />
+                  </Button>
                 )}
-                {isMulti && (
-                  <div className="flex flex-col gap-2">
-                    {currentQuestion.options.map((option) => {
-                      const checked = selectedIds.includes(option.id);
-                      const showCorrectness = attempt.reviewAvailable;
-                      return (
-                        <label
-                          key={option.id}
-                          className={cn(
-                            "border-outline-variant flex items-center gap-3 rounded-lg border p-3 text-sm",
-                            showCorrectness &&
-                              option.isCorrect &&
-                              "border-success/40 bg-success/5",
-                            showCorrectness &&
-                              !option.isCorrect &&
-                              checked &&
-                              "border-destructive/40 bg-destructive/5",
-                          )}
-                        >
-                          <Checkbox
-                            checked={checked}
-                            disabled={!inProgress}
-                            onCheckedChange={(value) =>
-                              handleMultiChange(
-                                currentQuestion.questionId,
-                                option.id,
-                                value === true,
-                              )
-                            }
-                          />
-                          <span className="flex-1">{option.text}</span>
-                          {showCorrectness && option.isCorrect && (
-                            <CheckCircle2 className="text-success size-4 shrink-0" />
-                          )}
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-                {isText && (
-                  <Input
-                    value={textValue}
-                    disabled={!inProgress}
-                    onChange={(e) =>
-                      handleTextChange(
-                        currentQuestion.questionId,
-                        e.target.value,
-                      )
-                    }
-                    placeholder="Type your answer..."
-                  />
-                )}
+              </div>
+            </div>
+
+            <Card className="h-fit">
+              <CardHeader>
+                <CardTitle className="text-base">Question Map</CardTitle>
+                <CardDescription>
+                  {answeredCount} of {totalQuestions} answered
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+                  <span className="flex items-center gap-1.5">
+                    <span className="bg-primary inline-block size-2.5 rounded-full" />
+                    Answered
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="border-outline-variant inline-block size-2.5 rounded-full border" />
+                    Unanswered
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="ring-primary inline-block size-2.5 rounded-full ring-2" />
+                    Current
+                  </span>
+                  {inProgress && (
+                    <span className="flex items-center gap-1.5">
+                      <Flag className="fill-destructive text-destructive size-3" />
+                      Flagged
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {mapEntries.map((entry) => (
+                    <button
+                      key={entry.questionId}
+                      type="button"
+                      onClick={() => setCurrentIndex(entry.index)}
+                      aria-label={`Question ${entry.index + 1}${
+                        entry.answered ? ", answered" : ", unanswered"
+                      }${entry.flagged ? ", flagged" : ""}${
+                        entry.index === safeIndex ? ", current" : ""
+                      }`}
+                      className={cn(
+                        "relative flex size-9 items-center justify-center rounded-full border text-sm font-medium transition-colors",
+                        entry.answered
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background text-foreground border-outline-variant",
+                        entry.index === safeIndex &&
+                          "ring-primary ring-2 ring-offset-1",
+                      )}
+                    >
+                      {entry.index + 1}
+                      {entry.flagged && (
+                        <Flag className="fill-destructive text-destructive absolute -top-1.5 -right-1.5 size-3" />
+                      )}
+                    </button>
+                  ))}
+                </div>
               </CardContent>
             </Card>
-
-            <div className="flex items-center justify-between">
-              <Button
-                variant="ghost"
-                disabled={safeIndex === 0}
-                onClick={() => setCurrentIndex((i) => i - 1)}
-              >
-                <ArrowLeft className="size-4" />
-                Previous
-              </Button>
-              {inProgress && isLastQuestion ? (
-                <Button onClick={handleSubmitClick} disabled={submitting}>
-                  {submitting ? "Submitting…" : "Submit"}
-                </Button>
-              ) : (
-                <Button
-                  disabled={isLastQuestion}
-                  onClick={() => setCurrentIndex((i) => i + 1)}
-                >
-                  Next Question
-                  <ArrowRight className="size-4" />
-                </Button>
-              )}
-            </div>
           </div>
-
-          <Card className="h-fit">
-            <CardHeader>
-              <CardTitle className="text-base">Question Map</CardTitle>
-              <CardDescription>
-                {answeredCount} of {totalQuestions} answered
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
-                <span className="flex items-center gap-1.5">
-                  <span className="bg-primary inline-block size-2.5 rounded-full" />
-                  Answered
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="border-outline-variant inline-block size-2.5 rounded-full border" />
-                  Unanswered
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="ring-primary inline-block size-2.5 rounded-full ring-2" />
-                  Current
-                </span>
-                {inProgress && (
-                  <span className="flex items-center gap-1.5">
-                    <Flag className="fill-destructive text-destructive size-3" />
-                    Flagged
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-5 gap-2">
-                {mapEntries.map((entry) => (
-                  <button
-                    key={entry.questionId}
-                    type="button"
-                    onClick={() => setCurrentIndex(entry.index)}
-                    aria-label={`Question ${entry.index + 1}${
-                      entry.answered ? ", answered" : ", unanswered"
-                    }${entry.flagged ? ", flagged" : ""}${
-                      entry.index === safeIndex ? ", current" : ""
-                    }`}
-                    className={cn(
-                      "relative flex size-9 items-center justify-center rounded-full border text-sm font-medium transition-colors",
-                      entry.answered
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-background text-foreground border-outline-variant",
-                      entry.index === safeIndex &&
-                        "ring-primary ring-2 ring-offset-1",
-                    )}
-                  >
-                    {entry.index + 1}
-                    {entry.flagged && (
-                      <Flag className="fill-destructive text-destructive absolute -top-1.5 -right-1.5 size-3" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+        )}
 
       {!inProgress && !attempt.reviewAvailable && (
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <AlertTriangle className="size-4" />
-          This quiz doesn&apos;t show a detailed answer review.
-        </p>
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+            <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-full">
+              <EyeOff className="size-6" />
+            </div>
+            <div>
+              <p className="font-medium">
+                Answer review isn&apos;t available yet
+              </p>
+              <p className="text-muted-foreground mt-1 max-w-sm text-sm">
+                Your score above is final. Your teacher hasn&apos;t released
+                which answers were correct yet — check back later, or ask them
+                directly.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
