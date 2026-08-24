@@ -1,8 +1,19 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
 
 import { RegisterForm } from "@/features/auth/register-form";
+
+// noindex, same reasoning as login/page.tsx's metadata — a signup form isn't unique content to
+// rank on, so it stays out of search results in favor of the homepage.
+export const metadata: Metadata = {
+  title: "Create a Teacher Account",
+  description:
+    "Register a free QuizGuard (quizkh) teacher account to start building quizzes and exams.",
+  robots: { index: false, follow: true },
+  alternates: { canonical: "/register" },
+};
 
 export default async function RegisterPage() {
   // Forces dynamic rendering — a statically-prerendered page has no per-request nonce to

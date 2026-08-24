@@ -1,8 +1,19 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
 
 import { LoginForm } from "@/features/auth/login-form";
+
+// noindex: a sign-in form has no unique content for a search query, so it shouldn't compete
+// with the homepage for "quiz"/"quizkh" search relevance — still crawlable (follow: true) so
+// links from it (e.g. to /register) are discovered normally.
+export const metadata: Metadata = {
+  title: "Sign In",
+  description: "Sign in to your QuizGuard (quizkh) account.",
+  robots: { index: false, follow: true },
+  alternates: { canonical: "/login" },
+};
 
 export default async function LoginPage() {
   // Forces dynamic rendering — a statically-prerendered page has no per-request nonce to
