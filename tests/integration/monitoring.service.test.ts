@@ -10,6 +10,7 @@ import {
   submitAttempt,
 } from "@/backend/attempts/attempt.service";
 import { hashPassword } from "@/backend/auth/password";
+import type { AuthUser } from "@/backend/auth/session";
 import {
   getActivityHistory,
   getAttemptDetailForTeacher,
@@ -42,6 +43,7 @@ describe("monitoring.service (integration)", () => {
   const suffix = randomUUID().slice(0, 8);
   const userIds: string[] = [];
   let teacherId: string;
+  let requester: AuthUser;
   let studentId: string;
   let classId: string;
   let mcQuestionId: string;
@@ -62,6 +64,12 @@ describe("monitoring.service (integration)", () => {
       .returning();
     await db.insert(teachers).values({ userId: teacher.id });
     teacherId = teacher.id;
+    requester = {
+      id: teacher.id,
+      email: teacher.email,
+      name: teacher.name,
+      role: "teacher",
+    };
     userIds.push(teacher.id);
 
     const [student] = await db
@@ -121,8 +129,8 @@ describe("monitoring.service (integration)", () => {
       teacherId,
     );
     quizId = quiz.id;
-    await setQuizQuestionPool(quizId, [mcQuestionId]);
-    await publishQuiz(quizId);
+    await setQuizQuestionPool(quizId, [mcQuestionId], requester);
+    await publishQuiz(quizId, requester);
     await createAssignment(quizId, { classId }, teacherId);
   });
 
@@ -221,6 +229,7 @@ describe("monitoring.service (integration)", () => {
   async function createLockTestQuiz(
     title: string,
     fullscreenRequired: boolean,
+    monitorActivity = true,
   ) {
     const quiz = await createQuiz(
       {
@@ -232,7 +241,7 @@ describe("monitoring.service (integration)", () => {
         randomizeQuestions: false,
         randomizeOptions: false,
         fullscreenRequired,
-        monitorActivity: true,
+        monitorActivity,
         autoSave: true,
         autoSubmit: true,
         showResults: true,
@@ -240,8 +249,8 @@ describe("monitoring.service (integration)", () => {
       },
       teacherId,
     );
-    await setQuizQuestionPool(quiz.id, [mcQuestionId]);
-    await publishQuiz(quiz.id);
+    await setQuizQuestionPool(quiz.id, [mcQuestionId], requester);
+    await publishQuiz(quiz.id, requester);
     await createAssignment(quiz.id, { classId }, teacherId);
     return quiz.id;
   }
@@ -262,10 +271,29 @@ describe("monitoring.service (integration)", () => {
     expect(detail.locked).toBe(true);
   });
 
-  it("does not lock for tab_switch or copy_paste, even on a fullscreen-required quiz", async () => {
+  it("locks on a tab switch when the quiz has activity monitoring on", async () => {
+    const lockQuizId = await createLockTestQuiz(
+      "Tab Switch Lock Quiz",
+      false,
+      true,
+    );
+    const attempt = await startAttempt(lockQuizId, studentId);
+    const active = await requireActiveAttemptForAnswering(
+      attempt.id,
+      studentId,
+    );
+    const locked = await recordViolation(active, { type: "tab_switch" });
+    expect(locked).toBe(true);
+
+    const detail = await getAttemptDetailForTeacher(lockQuizId, attempt.id);
+    expect(detail.locked).toBe(true);
+  });
+
+  it("does not lock for tab_switch when activity monitoring is off, or ever for copy_paste, even on a fullscreen-required quiz", async () => {
     const lockQuizId = await createLockTestQuiz(
       "Non-Lock Violation Quiz",
       true,
+      false,
     );
     const attempt = await startAttempt(lockQuizId, studentId);
     const active = await requireActiveAttemptForAnswering(

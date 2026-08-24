@@ -10,6 +10,7 @@ import {
   submitAttempt,
 } from "@/backend/attempts/attempt.service";
 import { hashPassword } from "@/backend/auth/password";
+import type { AuthUser } from "@/backend/auth/session";
 import { saveAnswer } from "@/backend/answers/answer.service";
 import { getTeacherDashboard } from "@/backend/dashboard/dashboard.service";
 import { recordViolation } from "@/backend/monitoring/monitoring.service";
@@ -38,6 +39,7 @@ describe("dashboard.service (integration)", () => {
   const suffix = randomUUID().slice(0, 8);
   const userIds: string[] = [];
   let teacherId: string;
+  let requester: AuthUser;
   let studentAId: string;
   let studentBId: string;
   let studentCId: string;
@@ -61,6 +63,12 @@ describe("dashboard.service (integration)", () => {
       .returning();
     await db.insert(teachers).values({ userId: teacher.id });
     teacherId = teacher.id;
+    requester = {
+      id: teacher.id,
+      email: teacher.email,
+      name: teacher.name,
+      role: "teacher",
+    };
     userIds.push(teacher.id);
 
     async function makeStudent(label: string) {
@@ -128,8 +136,8 @@ describe("dashboard.service (integration)", () => {
       teacherId,
     );
     quizId = quiz.id;
-    await setQuizQuestionPool(quizId, [question.id]);
-    await publishQuiz(quizId);
+    await setQuizQuestionPool(quizId, [question.id], requester);
+    await publishQuiz(quizId, requester);
     await createAssignment(quizId, { classId }, teacherId);
     await createAssignment(
       quizId,
@@ -139,13 +147,16 @@ describe("dashboard.service (integration)", () => {
 
     // Student A: answers correctly, submits, and gets flagged 3 times (crosses the
     // "flagged" threshold — see FLAGGED_VIOLATION_THRESHOLD in dashboard.service.ts).
+    // All three are copy_paste, which recordViolation never locks the attempt for (unlike
+    // fullscreen_exit/tab_switch, which lock based on the quiz's own settings) — this test is
+    // only exercising the flagged-count aggregation, not the locking feature.
     const attemptA = await startAttempt(quizId, studentAId);
     const activeA = await requireActiveAttemptForAnswering(
       attemptA.id,
       studentAId,
     );
-    await recordViolation(activeA, { type: "tab_switch" });
-    await recordViolation(activeA, { type: "tab_switch" });
+    await recordViolation(activeA, { type: "copy_paste" });
+    await recordViolation(activeA, { type: "copy_paste" });
     await recordViolation(activeA, { type: "copy_paste" });
     await saveAnswer(activeA, {
       questionId: question.id,
