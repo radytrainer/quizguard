@@ -220,6 +220,26 @@ export async function unpublishQuiz(
   return setQuizStatus(id, "draft", requester);
 }
 
+/** Backs the one-click "Release answers"/"Hide answers" action on the results page — the same
+ * showResults field the settings form's toggle edits, just reachable without a full quiz-edit
+ * round trip. attempt.service.ts's getAttempt() re-reads this live on every request, so
+ * flipping it takes effect immediately for students, including on already-submitted attempts. */
+export async function setQuizShowResults(
+  id: string,
+  showResults: boolean,
+  requester: AuthUser,
+): Promise<Quiz> {
+  await requireOwnedQuiz(id, requester);
+
+  const [quiz] = await db
+    .update(quizzes)
+    .set({ showResults, updatedAt: new Date() })
+    .where(eq(quizzes.id, id))
+    .returning();
+
+  return quiz;
+}
+
 export async function archiveQuiz(
   id: string,
   requester: AuthUser,

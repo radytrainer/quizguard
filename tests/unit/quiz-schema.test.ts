@@ -24,7 +24,7 @@ describe("quizInputSchema", () => {
     expect(result.randomizeQuestions).toBe(false);
     expect(result.autoSave).toBe(true);
     expect(result.autoSubmit).toBe(true);
-    expect(result.showResults).toBe(true);
+    expect(result.showResults).toBe(false);
   });
 
   it("rejects an empty title", () => {

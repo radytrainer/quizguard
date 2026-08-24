@@ -572,8 +572,8 @@ export function QuizWizard() {
                     onCheckedChange={(v) => set("monitorActivity", v)}
                   />
                   <SettingToggle
-                    label="Show results to students"
-                    description="Students can see their score after submitting."
+                    label="Release answers to students"
+                    description="Students always see their score; this additionally reveals which answers were correct. You can also toggle this later from the quiz's Results page."
                     checked={form.showResults}
                     onCheckedChange={(v) => set("showResults", v)}
                   />

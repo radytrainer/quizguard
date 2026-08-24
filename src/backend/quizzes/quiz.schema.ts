@@ -20,7 +20,8 @@ export const quizInputSchema = z
     monitorActivity: z.boolean().default(false),
     autoSave: z.boolean().default(true),
     autoSubmit: z.boolean().default(true),
-    showResults: z.boolean().default(true),
+    // Off by default — see quizzes.ts's showResults column comment.
+    showResults: z.boolean().default(false),
     questionsPerAttempt: z
       .number()
       .int()

@@ -34,7 +34,8 @@ export const initialWizardForm: WizardFormState = {
   randomizeOptions: false,
   autoSave: true,
   autoSubmit: true,
-  showResults: true,
+  // Off by default — see database/schema/quizzes.ts's showResults column comment.
+  showResults: false,
   fullscreenRequired: false,
   monitorActivity: false,
   startAt: "",

@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/card";
 import { getCurrentUser } from "@/backend/auth/session";
 import { getQuizResults } from "@/backend/results/results.service";
+import { getQuiz } from "@/backend/quizzes/quiz.service";
+import { ReleaseResultsToggle } from "@/features/quizzes/release-results-toggle";
 import { ApiError } from "@/lib/api-response";
 
 function formatPercent(value: number | null): string {
@@ -27,13 +29,17 @@ export default async function QuizResultsPage({
 
   const { id } = await params;
 
-  let results;
   try {
-    results = await getQuizResults(id);
+    await getQuiz(id, user);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) notFound();
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 403)
+    )
+      notFound();
     throw error;
   }
+  const results = await getQuizResults(id);
 
   const maxBucketCount = Math.max(
     1,
@@ -51,13 +57,21 @@ export default async function QuizResultsPage({
             {results.quizTitle}
           </h1>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/teacher/quizzes/${id}/attempts`}>View Attempts</Link>
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <a href={`/api/quizzes/${id}/results/export`}>Export CSV</a>
-          </Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/teacher/quizzes/${id}/attempts`}>
+                View Attempts
+              </Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href={`/api/quizzes/${id}/results/export`}>Export CSV</a>
+            </Button>
+          </div>
+          <ReleaseResultsToggle
+            quizId={id}
+            initialShowResults={results.showResults}
+          />
         </div>
       </div>
 

@@ -1,0 +1,1 @@
+ALTER TABLE "quizzes" ALTER COLUMN "show_results" SET DEFAULT false;

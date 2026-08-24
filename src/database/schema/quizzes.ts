@@ -42,7 +42,10 @@ export const quizzes = pgTable(
     monitorActivity: boolean("monitor_activity").notNull().default(false),
     autoSave: boolean("auto_save").notNull().default(true),
     autoSubmit: boolean("auto_submit").notNull().default(true),
-    showResults: boolean("show_results").notNull().default(true),
+    // Off by default: students see only their score/pass-fail (attempt.service.ts's getAttempt
+    // always returns those) until the teacher explicitly releases the per-question answer
+    // review, either here or via the one-click release-results/hide-results actions.
+    showResults: boolean("show_results").notNull().default(false),
     // How many pooled questions each attempt draws (Phase 7 does the actual random sampling
     // at attempt-creation time; this phase only stores the configuration — see
     // docs/ARCHITECTURE.md — Section 7).

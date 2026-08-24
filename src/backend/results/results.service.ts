@@ -38,6 +38,7 @@ export interface QuestionDifficultyStat {
 export interface QuizResultsSummary {
   quizId: string;
   quizTitle: string;
+  showResults: boolean;
   totalAttempts: number;
   finishedAttempts: number;
   inProgressAttempts: number;
@@ -51,7 +52,11 @@ export interface QuizResultsSummary {
 
 async function requireQuiz(quizId: string) {
   const [quiz] = await db
-    .select({ id: quizzes.id, title: quizzes.title })
+    .select({
+      id: quizzes.id,
+      title: quizzes.title,
+      showResults: quizzes.showResults,
+    })
     .from(quizzes)
     .where(eq(quizzes.id, quizId))
     .limit(1);
@@ -159,6 +164,7 @@ export async function getQuizResults(
   return {
     quizId: quiz.id,
     quizTitle: quiz.title,
+    showResults: quiz.showResults,
     totalAttempts: attempts.length,
     finishedAttempts: finished.length,
     inProgressAttempts: attempts.length - finished.length,
