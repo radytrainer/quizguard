@@ -23,6 +23,7 @@ import {
   createQuiz,
   publishQuiz,
   setQuizQuestionPool,
+  setQuizShowResults,
 } from "@/backend/quizzes/quiz.service";
 import { db, pool } from "@/lib/db";
 import {
@@ -258,6 +259,75 @@ describe("attempt.service + answer.service (integration)", () => {
       (o) => o.id === mcCorrectOptionId,
     )!;
     expect(correctOption.isCorrect).toBe(true);
+  });
+
+  it("hides question text, options, and the student's own answers until the teacher releases review", async () => {
+    // Its own quiz with showResults: false — the shared quiz above has it true so it can assert
+    // reviewAvailable/isCorrect once finished; this one asserts the opposite default.
+    const hiddenQuiz = await createQuiz(
+      {
+        title: `Hidden Review Quiz ${suffix}`,
+        subject: `Attempt Subject ${suffix}`,
+        durationMinutes: 30,
+        passingScore: 50,
+        maxAttempts: 3,
+        randomizeQuestions: false,
+        randomizeOptions: false,
+        fullscreenRequired: false,
+        monitorActivity: false,
+        autoSave: true,
+        autoSubmit: true,
+        showResults: false,
+        questionsPerAttempt: 1,
+      },
+      teacherId,
+    );
+    await setQuizQuestionPool(hiddenQuiz.id, [mcQuestionId], requester);
+    await publishQuiz(hiddenQuiz.id, requester);
+    await createAssignment(hiddenQuiz.id, { classId }, teacherId);
+
+    const attempt = await startAttempt(hiddenQuiz.id, studentId);
+    const active = await requireActiveAttemptForAnswering(
+      attempt.id,
+      studentId,
+    );
+    await saveAnswer(active, {
+      questionId: mcQuestionId,
+      selectedOptionIds: [mcCorrectOptionId],
+    });
+
+    // While in progress, the student still needs the full question/option/answer snapshot to
+    // keep answering — only correctness (isCorrect) is withheld.
+    const inProgressView = await getAttempt(attempt.id, studentId);
+    expect(inProgressView.reviewAvailable).toBe(false);
+    expect(inProgressView.questions).toHaveLength(1);
+    expect(inProgressView.questions[0]?.answer?.selectedOptionIds).toEqual([
+      mcCorrectOptionId,
+    ]);
+
+    const submitted = await submitAttempt(attempt.id, studentId);
+    expect(submitted.status).toBe("submitted");
+    expect(submitted.score).toBe(2);
+
+    // Once finished with review still withheld, the score is visible but per-question data —
+    // question text, options, and the student's own selected answer — must not be sent at all,
+    // not just have `isCorrect` stripped from it.
+    const finishedView = await getAttempt(attempt.id, studentId);
+    expect(finishedView.reviewAvailable).toBe(false);
+    expect(finishedView.score).toBe(2);
+    expect(finishedView.maxScore).toBe(2);
+    expect(finishedView.passed).toBe(true);
+    expect(finishedView.questions).toEqual([]);
+
+    // The teacher releasing review flips it back on immediately, no re-submission needed.
+    await setQuizShowResults(hiddenQuiz.id, true, requester);
+    const releasedView = await getAttempt(attempt.id, studentId);
+    expect(releasedView.reviewAvailable).toBe(true);
+    expect(releasedView.questions).toHaveLength(1);
+    const correctOption = releasedView.questions[0]?.options.find(
+      (o) => o.id === mcCorrectOptionId,
+    );
+    expect(correctOption?.isCorrect).toBe(true);
   });
 
   it("submitting again is idempotent and doesn't re-grade", async () => {

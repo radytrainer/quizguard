@@ -309,23 +309,10 @@ export async function startAttempt(
   return attempt;
 }
 
-/** Deliberately read-only, unlike `requireActiveAttemptForAnswering` below — a `GET` must
- * never have a side effect (Rule: HTTP GET is safe/idempotent; also the concrete reason this
- * matters here: `SameSite=Lax` doesn't protect `GET` from cross-site triggering the way it does
- * `POST`/`PUT`, so a mutation reachable via `GET` would be a real CSRF hole). A `GET` on an
- * expired-but-still-`in_progress` attempt returns it exactly as stored — `deadlineAt` already
- * tells the client it's over, and the client's own countdown (`exam-attempt.tsx`) fires the
- * actual `POST /submit` within a second of noticing. If nothing ever calls a mutating endpoint
- * again, the attempt simply stays `in_progress` until `startAttempt`'s own `maybeExpire` check
- * closes it out the next time that student tries to start a new one — never a dangling problem,
- * just a display staleness one, and only for an abandoned attempt nobody is looking at. */
-export async function getAttempt(
+async function loadQuestionViews(
   attemptId: string,
-  studentId: string,
-): Promise<AttemptView> {
-  const attempt = await requireOwnedAttempt(attemptId, studentId);
-  const quiz = await requireQuiz(attempt.quizId);
-
+  reviewAvailable: boolean,
+): Promise<AttemptQuestionView[]> {
   const snapshot = await db
     .select({
       questionId: examAttemptQuestions.questionId,
@@ -361,10 +348,7 @@ export async function getAttempt(
     .where(eq(examAnswers.attemptId, attemptId));
   const answerByQuestion = new Map(answerRows.map((a) => [a.questionId, a]));
 
-  const finished = attempt.status !== "in_progress";
-  const reviewAvailable = finished && quiz.showResults;
-
-  const questionViews: AttemptQuestionView[] = snapshot.map((row) => {
+  return snapshot.map((row) => {
     const optionsById = new Map(
       (optionsByQuestion.get(row.questionId) ?? []).map((o) => [o.id, o]),
     );
@@ -391,6 +375,36 @@ export async function getAttempt(
         : null,
     };
   });
+}
+
+/** Deliberately read-only, unlike `requireActiveAttemptForAnswering` below — a `GET` must
+ * never have a side effect (Rule: HTTP GET is safe/idempotent; also the concrete reason this
+ * matters here: `SameSite=Lax` doesn't protect `GET` from cross-site triggering the way it does
+ * `POST`/`PUT`, so a mutation reachable via `GET` would be a real CSRF hole). A `GET` on an
+ * expired-but-still-`in_progress` attempt returns it exactly as stored — `deadlineAt` already
+ * tells the client it's over, and the client's own countdown (`exam-attempt.tsx`) fires the
+ * actual `POST /submit` within a second of noticing. If nothing ever calls a mutating endpoint
+ * again, the attempt simply stays `in_progress` until `startAttempt`'s own `maybeExpire` check
+ * closes it out the next time that student tries to start a new one — never a dangling problem,
+ * just a display staleness one, and only for an abandoned attempt nobody is looking at. */
+export async function getAttempt(
+  attemptId: string,
+  studentId: string,
+): Promise<AttemptView> {
+  const attempt = await requireOwnedAttempt(attemptId, studentId);
+  const quiz = await requireQuiz(attempt.quizId);
+
+  const finished = attempt.status !== "in_progress";
+  const reviewAvailable = finished && quiz.showResults;
+  // While in progress, the student needs the full question/option/answer snapshot to keep
+  // taking the exam. Once finished, per-question data — including the student's own selected
+  // answers, not just which option was correct — is exam-review data and must stay server-side
+  // until the teacher releases it via reviewAvailable: hiding it in the UI alone would still
+  // leave it sitting in this endpoint's raw JSON for anyone reading the response directly.
+  const questionViews: AttemptQuestionView[] =
+    !finished || reviewAvailable
+      ? await loadQuestionViews(attemptId, reviewAvailable)
+      : [];
 
   return {
     id: attempt.id,
