@@ -10,11 +10,26 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { getCurrentUser } from "@/backend/auth/session";
+import { listAttemptsForQuiz } from "@/backend/monitoring/monitoring.service";
 import { getQuizResults } from "@/backend/results/results.service";
 import { getQuiz } from "@/backend/quizzes/quiz.service";
 import { ReleaseResultsToggle } from "@/features/quizzes/release-results-toggle";
 import { ApiError } from "@/lib/api-response";
+
+const STATUS_LABELS: Record<string, string> = {
+  in_progress: "In progress",
+  submitted: "Submitted",
+  auto_submitted: "Auto-submitted",
+};
 
 function formatPercent(value: number | null): string {
   return value === null ? "—" : `${Math.round(value)}%`;
@@ -39,7 +54,10 @@ export default async function QuizResultsPage({
       notFound();
     throw error;
   }
-  const results = await getQuizResults(id);
+  const [results, attempts] = await Promise.all([
+    getQuizResults(id),
+    listAttemptsForQuiz(id),
+  ]);
 
   const maxBucketCount = Math.max(
     1,
@@ -182,6 +200,85 @@ export default async function QuizResultsPage({
               </div>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Student results ({attempts.length})
+          </CardTitle>
+          <CardDescription>
+            Every attempt on this quiz — open one to review its
+            question-by-question breakdown.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {attempts.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No attempts yet.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Student</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Score</TableHead>
+                  <TableHead>Result</TableHead>
+                  <TableHead className="text-right">Review</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {attempts.map((attempt) => (
+                  <TableRow key={attempt.id}>
+                    <TableCell className="font-medium">
+                      <div className="flex flex-col">
+                        <span>{attempt.studentName}</span>
+                        {attempt.studentEmail && (
+                          <span className="text-muted-foreground text-xs font-normal">
+                            {attempt.studentEmail}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {STATUS_LABELS[attempt.status]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {attempt.score === null
+                        ? "—"
+                        : `${attempt.score} / ${attempt.maxScore}`}
+                    </TableCell>
+                    <TableCell>
+                      {attempt.passed === null ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className={
+                            attempt.passed
+                              ? "border-success/30 bg-success/10 text-success"
+                              : "border-destructive/30 bg-destructive/10 text-destructive"
+                          }
+                        >
+                          {attempt.passed ? "Passed" : "Not passed"}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Link
+                        href={`/teacher/quizzes/${id}/attempts/${attempt.id}`}
+                        className="text-primary text-sm hover:underline"
+                      >
+                        Review
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>
