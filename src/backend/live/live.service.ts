@@ -22,8 +22,10 @@ import {
 } from "@/database/schema";
 import { computeSpeedPoints } from "@/backend/live/live-scoring";
 import {
+  LIVE_AVATARS,
   LIVE_QUESTION_TYPES,
   type CreateLiveSessionInput,
+  type LiveAvatar,
   type LiveLeaderboardEntry,
   type LiveOptionView,
   type LiveQuestionView,
@@ -33,6 +35,13 @@ import {
 } from "@/backend/live/live.schema";
 
 export { computeSpeedPoints };
+
+// An authenticated student never picks one (only the guest "what's your name" step has a
+// picker) — every participant still needs some avatar for the roster/leaderboard badge, so one
+// is assigned at random rather than left to a hardcoded default for every logged-in player.
+function pickRandomAvatar(): LiveAvatar {
+  return LIVE_AVATARS[randomInt(0, LIVE_AVATARS.length)];
+}
 
 function shuffle<T>(items: T[]): T[] {
   const copy = [...items];
@@ -217,7 +226,12 @@ export async function joinSession(
 
   await db
     .insert(liveSessionParticipants)
-    .values({ sessionId, studentId, displayName: studentName })
+    .values({
+      sessionId,
+      studentId,
+      displayName: studentName,
+      avatar: pickRandomAvatar(),
+    })
     .onConflictDoNothing({
       target: [
         liveSessionParticipants.sessionId,
@@ -249,6 +263,7 @@ export async function joinSessionAsGuest(
   sessionId: string,
   guestToken: string,
   guestName: string,
+  avatar?: LiveAvatar,
 ): Promise<LiveSessionParticipant> {
   const session = await requireSession(sessionId);
   if (session.status === "finished" || session.status === "cancelled") {
@@ -263,7 +278,12 @@ export async function joinSessionAsGuest(
 
   await db
     .insert(liveSessionParticipants)
-    .values({ sessionId, guestToken, displayName })
+    .values({
+      sessionId,
+      guestToken,
+      displayName,
+      avatar: avatar ?? pickRandomAvatar(),
+    })
     .onConflictDoNothing({
       target: [
         liveSessionParticipants.sessionId,
@@ -290,6 +310,7 @@ export async function getRoster(sessionId: string): Promise<LiveRosterEntry[]> {
       participantId: liveSessionParticipants.id,
       studentId: liveSessionParticipants.studentId,
       name: liveSessionParticipants.displayName,
+      avatar: liveSessionParticipants.avatar,
     })
     .from(liveSessionParticipants)
     .where(eq(liveSessionParticipants.sessionId, sessionId))
@@ -505,6 +526,7 @@ async function rankedParticipants(sessionId: string) {
       participantId: liveSessionParticipants.id,
       name: liveSessionParticipants.displayName,
       score: liveSessionParticipants.score,
+      avatar: liveSessionParticipants.avatar,
     })
     .from(liveSessionParticipants)
     .where(eq(liveSessionParticipants.sessionId, sessionId))

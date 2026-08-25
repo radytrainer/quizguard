@@ -8,6 +8,22 @@ export const LIVE_QUESTION_TYPES = [
   "multiple_answer",
 ] as const;
 
+// A closed, cosmetic set of roster/leaderboard avatars — lucide-react has no dedicated
+// lion/tiger glyph in this version (same gap option-styles.ts already worked around), so this
+// list sticks to animals it actually has an icon for. See features/live/avatar-styles.ts for
+// the icon/color mapping.
+export const LIVE_AVATARS = [
+  "cat",
+  "dog",
+  "rabbit",
+  "turtle",
+  "bird",
+  "fish",
+  "panda",
+  "squirrel",
+] as const;
+export type LiveAvatar = (typeof LIVE_AVATARS)[number];
+
 export const createLiveSessionSchema = z.object({
   // Omit to open the session to any authenticated student with the join code.
   classId: z.string().uuid().optional(),
@@ -18,10 +34,13 @@ export type CreateLiveSessionInput = z.infer<typeof createLiveSessionSchema>;
 // guestName/guestToken are only used by an unauthenticated ("anyone with the code", no account)
 // join — a logged-in student or host is identified from their session cookie instead, and the
 // realtime server ignores these two fields for them. See live.service.ts's joinSessionAsGuest.
+// `avatar` is guest-only too, picked at the same "what's your name" step — an authenticated
+// student never sends one and gets one assigned at random instead (see pickRandomAvatar).
 export const liveJoinSchema = z.object({
   sessionId: z.string().uuid(),
   guestName: z.string().trim().min(1).max(40).optional(),
   guestToken: z.string().uuid().optional(),
+  avatar: z.enum(LIVE_AVATARS).optional(),
 });
 export type LiveJoinInput = z.infer<typeof liveJoinSchema>;
 
@@ -62,6 +81,7 @@ export interface LiveRosterEntry {
   // null for a guest ("anyone with the code", no account) participant.
   studentId: string | null;
   name: string;
+  avatar: LiveAvatar;
 }
 
 export interface LiveRevealView {
@@ -84,6 +104,7 @@ export interface LiveLeaderboardEntry {
   name: string;
   score: number;
   rank: number;
+  avatar: LiveAvatar;
 }
 
 export interface LiveLeaderboardView {

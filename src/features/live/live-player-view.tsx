@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type {
+  LiveAvatar,
   LiveLeaderboardEntry,
   LiveQuestionView,
   LiveStateSync,
@@ -39,12 +40,16 @@ type Phase =
 export function LivePlayerView({
   sessionId,
   guestName,
+  guestAvatar,
 }: {
   sessionId: string;
   // Set only by the no-account "anyone with the code" path (features/live/guest-join.tsx) —
   // an authenticated student/host is identified from their session cookie instead, same as
   // every other realtime feature in this app.
   guestName?: string;
+  // Picked at the same guest-live-entry.tsx step as guestName — an authenticated join never
+  // sends one and gets one assigned at random server-side instead (pickRandomAvatar).
+  guestAvatar?: LiveAvatar;
 }) {
   const [phase, setPhase] = useState<Phase>("connecting");
   const [quizTitle, setQuizTitle] = useState("");
@@ -97,7 +102,7 @@ export function LivePlayerView({
       socket.emit(
         "live:join",
         guestName && guestToken
-          ? { sessionId, guestName, guestToken }
+          ? { sessionId, guestName, guestToken, avatar: guestAvatar }
           : { sessionId },
       );
     }
@@ -183,7 +188,7 @@ export function LivePlayerView({
       socket.off("live:ended", onEnded);
       socket.off("live:error", onErrorEvent);
     };
-  }, [sessionId, guestName, guestToken]);
+  }, [sessionId, guestName, guestToken, guestAvatar]);
 
   useEffect(() => {
     if (phase !== "question") return;

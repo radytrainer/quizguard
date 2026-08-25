@@ -4,6 +4,11 @@ import { useEffect, useState } from "react";
 import { motion, useMotionValue, useSpring, useTransform } from "motion/react";
 
 import type { LiveLeaderboardEntry } from "@/backend/live/live.schema";
+import {
+  AVATAR_ICONS,
+  getAvatarBadgeColor,
+} from "@/features/live/avatar-styles";
+import { cn } from "@/lib/utils";
 
 // Springs toward a new score instead of snapping to it — Kahoot's own leaderboard does the
 // same, and it's what makes a score change between questions read as *movement* rather than a
@@ -36,22 +41,33 @@ export function AnimatedLeaderboardList({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      {entries.map((entry) => (
-        <motion.div
-          key={entry.participantId}
-          layout
-          transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          className="border-border bg-card flex items-center justify-between rounded-lg border p-3"
-        >
-          <span className="flex items-center gap-3">
-            <span className="text-muted-foreground w-6 font-mono">
-              #{entry.rank}
+      {entries.map((entry) => {
+        const Icon = AVATAR_ICONS[entry.avatar];
+        return (
+          <motion.div
+            key={entry.participantId}
+            layout
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="border-border bg-card flex items-center justify-between rounded-lg border p-3"
+          >
+            <span className="flex items-center gap-3">
+              <span className="text-muted-foreground w-6 font-mono">
+                #{entry.rank}
+              </span>
+              <span
+                className={cn(
+                  "flex size-7 shrink-0 items-center justify-center rounded-full text-white",
+                  getAvatarBadgeColor(entry.participantId),
+                )}
+              >
+                <Icon className="size-4" />
+              </span>
+              <span className="font-medium">{entry.name}</span>
             </span>
-            <span className="font-medium">{entry.name}</span>
-          </span>
-          <AnimatedScore value={entry.score} />
-        </motion.div>
-      ))}
+            <AnimatedScore value={entry.score} />
+          </motion.div>
+        );
+      })}
     </div>
   );
 }

@@ -301,7 +301,7 @@ io.on("connection", (socket: Socket) => {
   socket.on("live:join", async (payload: unknown) => {
     const parsed = liveJoinSchema.safeParse(payload);
     if (!parsed.success) return;
-    const { sessionId, guestName, guestToken } = parsed.data;
+    const { sessionId, guestName, guestToken, avatar } = parsed.data;
 
     try {
       if (user?.role === "student") {
@@ -335,6 +335,7 @@ io.on("connection", (socket: Socket) => {
           sessionId,
           guestToken,
           guestName,
+          avatar,
         );
         await announceParticipantJoin(sessionId, participant.id);
       } else {

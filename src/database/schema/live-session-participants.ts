@@ -1,6 +1,7 @@
 import {
   index,
   integer,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -10,6 +11,20 @@ import {
 
 import { liveSessions } from "@/database/schema/live-sessions";
 import { students } from "@/database/schema/students";
+
+// Mirrors LIVE_AVATARS in backend/live/live.schema.ts — kept as an independent literal list
+// here (not imported) the same way quizzes.ts's quiz_status enum doesn't import from
+// quiz.schema.ts's zod mirror, so this schema file stays free of any backend/* dependency.
+export const liveParticipantAvatarEnum = pgEnum("live_participant_avatar", [
+  "cat",
+  "dog",
+  "rabbit",
+  "turtle",
+  "bird",
+  "fish",
+  "panda",
+  "squirrel",
+]);
 
 export const liveSessionParticipants = pgTable(
   "live_session_participants",
@@ -32,6 +47,11 @@ export const liveSessionParticipants = pgTable(
     // the cost of not reflecting a mid-game display-name change (irrelevant here: a live
     // session lasts minutes, not long enough for that to matter).
     displayName: text("display_name").notNull(),
+    // Guests pick their own at the "what's your name" step; an authenticated student gets one
+    // assigned at random server-side (see live.service.ts's pickRandomAvatar) — every
+    // participant always has one, purely cosmetic (roster/leaderboard badge), never used for
+    // identity or scoring.
+    avatar: liveParticipantAvatarEnum("avatar").notNull().default("cat"),
     score: integer("score").notNull().default(0),
     joinedAt: timestamp("joined_at", { withTimezone: true })
       .notNull()

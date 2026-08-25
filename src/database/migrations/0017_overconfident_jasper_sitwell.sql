@@ -1,0 +1,2 @@
+CREATE TYPE "public"."live_participant_avatar" AS ENUM('cat', 'dog', 'rabbit', 'turtle', 'bird', 'fish', 'panda', 'squirrel');--> statement-breakpoint
+ALTER TABLE "live_session_participants" ADD COLUMN "avatar" "live_participant_avatar" DEFAULT 'cat' NOT NULL;

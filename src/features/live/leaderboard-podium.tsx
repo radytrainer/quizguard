@@ -7,6 +7,10 @@ import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { LiveLeaderboardEntry } from "@/backend/live/live.schema";
+import {
+  AVATAR_ICONS,
+  getAvatarBadgeColor,
+} from "@/features/live/avatar-styles";
 
 // A trophy-cup-on-a-column look (name, cup with a numbered badge, a labeled color block),
 // hardcoded regardless of light/dark theme same as option-styles.ts's answer colors — a gold
@@ -77,6 +81,7 @@ export function LeaderboardPodium({
           const entry = byRank.get(rank);
           if (!entry) return null;
           const style = PODIUM_STYLES[rank];
+          const Icon = AVATAR_ICONS[entry.avatar];
           return (
             <motion.div
               key={entry.participantId}
@@ -89,6 +94,14 @@ export function LeaderboardPodium({
               }}
               className="flex w-24 flex-col items-center"
             >
+              <span
+                className={cn(
+                  "mb-1 flex size-8 shrink-0 items-center justify-center rounded-full text-white",
+                  getAvatarBadgeColor(entry.participantId),
+                )}
+              >
+                <Icon className="size-4" />
+              </span>
               <p className="mb-1 w-full truncate text-center text-sm font-semibold">
                 {entry.name}
               </p>
@@ -140,20 +153,33 @@ export function LeaderboardPodium({
           </Button>
           {expanded && (
             <div className="flex flex-col gap-2">
-              {rest.map((entry) => (
-                <div
-                  key={entry.participantId}
-                  className="border-border flex items-center justify-between rounded-lg border p-3 text-sm"
-                >
-                  <span className="flex items-center gap-3">
-                    <span className="text-muted-foreground w-6 font-mono">
-                      #{entry.rank}
+              {rest.map((entry) => {
+                const Icon = AVATAR_ICONS[entry.avatar];
+                return (
+                  <div
+                    key={entry.participantId}
+                    className="border-border flex items-center justify-between rounded-lg border p-3 text-sm"
+                  >
+                    <span className="flex items-center gap-3">
+                      <span className="text-muted-foreground w-6 font-mono">
+                        #{entry.rank}
+                      </span>
+                      <span
+                        className={cn(
+                          "flex size-7 shrink-0 items-center justify-center rounded-full text-white",
+                          getAvatarBadgeColor(entry.participantId),
+                        )}
+                      >
+                        <Icon className="size-4" />
+                      </span>
+                      <span className="font-medium">{entry.name}</span>
                     </span>
-                    <span className="font-medium">{entry.name}</span>
-                  </span>
-                  <span className="font-mono font-semibold">{entry.score}</span>
-                </div>
-              ))}
+                    <span className="font-mono font-semibold">
+                      {entry.score}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

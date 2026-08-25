@@ -5,14 +5,16 @@ import { Radio } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { LiveAvatar } from "@/backend/live/live.schema";
+import { AvatarPicker } from "@/features/live/avatar-picker";
 import { LivePlayerView } from "@/features/live/live-player-view";
 
 const GUEST_NAME_MAX_LENGTH = 40;
 
 /** The Kahoot-style "what's your name" step for a no-account guest — shown once, before the
  * socket ever joins the game, so live-player-view.tsx never has to render a name prompt itself.
- * Nothing here is persisted beyond this render: the name only leaves this tab as part of the
- * `live:join` payload. */
+ * Nothing here is persisted beyond this render: the name/avatar only leave this tab as part of
+ * the `live:join` payload. */
 export function GuestLiveEntry({
   sessionId,
   quizTitle,
@@ -21,17 +23,27 @@ export function GuestLiveEntry({
   quizTitle: string;
 }) {
   const [name, setName] = useState("");
-  const [submittedName, setSubmittedName] = useState<string | null>(null);
+  const [avatar, setAvatar] = useState<LiveAvatar>("cat");
+  const [submitted, setSubmitted] = useState<{
+    name: string;
+    avatar: LiveAvatar;
+  } | null>(null);
 
-  if (submittedName) {
-    return <LivePlayerView sessionId={sessionId} guestName={submittedName} />;
+  if (submitted) {
+    return (
+      <LivePlayerView
+        sessionId={sessionId}
+        guestName={submitted.name}
+        guestAvatar={submitted.avatar}
+      />
+    );
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = name.trim().slice(0, GUEST_NAME_MAX_LENGTH);
     if (!trimmed) return;
-    setSubmittedName(trimmed);
+    setSubmitted({ name: trimmed, avatar });
   }
 
   return (
@@ -57,6 +69,12 @@ export function GuestLiveEntry({
           aria-label="Your name"
           autoFocus
         />
+        <div className="flex flex-col gap-2">
+          <p className="text-muted-foreground text-center text-xs font-medium tracking-wide uppercase">
+            Pick your avatar
+          </p>
+          <AvatarPicker value={avatar} onChange={setAvatar} />
+        </div>
         <Button type="submit" size="lg" disabled={name.trim().length === 0}>
           Enter Game
         </Button>

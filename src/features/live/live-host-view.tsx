@@ -25,6 +25,10 @@ import type {
 } from "@/backend/live/live.schema";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
 import { AnimatedLeaderboardList } from "@/features/live/animated-leaderboard";
+import {
+  AVATAR_ICONS,
+  getAvatarBadgeColor,
+} from "@/features/live/avatar-styles";
 import { LeaderboardPodium } from "@/features/live/leaderboard-podium";
 import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { cn } from "@/lib/utils";
@@ -206,29 +210,15 @@ export function LiveHostView({
                 </div>
               </div>
 
-              <div className="flex w-full flex-col items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <Users className="text-muted-foreground size-4" />
-                  <span className="font-semibold">{roster.length} joined</span>
-                </div>
-                {roster.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">
-                    Waiting for students to join…
-                  </p>
-                ) : (
-                  <div className="flex max-h-28 w-full flex-wrap justify-center gap-1.5 overflow-y-auto">
-                    {roster.map((r) => (
-                      <span
-                        key={r.participantId}
-                        className="border-border bg-secondary/50 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
-                      >
-                        <span className="bg-success inline-block size-1.5 shrink-0 rounded-full" />
-                        {r.name}
-                      </span>
-                    ))}
-                  </div>
-                )}
+              <div className="flex items-center gap-1.5">
+                <Users className="text-muted-foreground size-4" />
+                <span className="font-semibold">{roster.length} joined</span>
               </div>
+              {roster.length === 0 && (
+                <p className="text-muted-foreground text-sm">
+                  Waiting for students to join…
+                </p>
+              )}
             </div>
 
             {origin && (
@@ -246,6 +236,32 @@ export function LiveHostView({
               </div>
             )}
           </div>
+
+          {roster.length > 0 && (
+            <div className="grid max-h-80 grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3 md:grid-cols-4">
+              {roster.map((r) => {
+                const Icon = AVATAR_ICONS[r.avatar];
+                return (
+                  <div
+                    key={r.participantId}
+                    className="border-border flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center"
+                  >
+                    <span
+                      className={cn(
+                        "flex size-10 shrink-0 items-center justify-center rounded-full text-white",
+                        getAvatarBadgeColor(r.participantId),
+                      )}
+                    >
+                      <Icon className="size-5" />
+                    </span>
+                    <span className="w-full truncate text-xs font-medium">
+                      {r.name}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <Button
             size="lg"
