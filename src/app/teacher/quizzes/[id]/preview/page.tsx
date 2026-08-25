@@ -52,7 +52,13 @@ export default async function PreviewQuizPage({
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-muted-foreground text-sm">
-            Quizzes / <span className="text-primary">Preview</span>
+            <Link
+              href="/teacher/quizzes"
+              className="hover:text-foreground hover:underline"
+            >
+              Quizzes
+            </Link>{" "}
+            / <span className="text-primary">Preview</span>
           </p>
           <h1 className="text-2xl font-bold tracking-tight">{quiz.title}</h1>
           {quiz.description && (

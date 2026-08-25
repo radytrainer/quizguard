@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { getCurrentUser } from "@/backend/auth/session";
@@ -34,7 +35,13 @@ export default async function EditQuizPage({
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-muted-foreground text-sm">
-            Quizzes / <span className="text-primary">{quiz.title}</span>
+            <Link
+              href="/teacher/quizzes"
+              className="hover:text-foreground hover:underline"
+            >
+              Quizzes
+            </Link>{" "}
+            / <span className="text-primary">{quiz.title}</span>
           </p>
           <h1 className="text-2xl font-bold tracking-tight">{quiz.title}</h1>
         </div>

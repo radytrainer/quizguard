@@ -69,7 +69,13 @@ export default async function QuizResultsPage({
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-muted-foreground text-sm">
-            Quizzes / <span className="text-primary">Results</span>
+            <Link
+              href="/teacher/quizzes"
+              className="hover:text-foreground hover:underline"
+            >
+              Quizzes
+            </Link>{" "}
+            / <span className="text-primary">Results</span>
           </p>
           <h1 className="text-2xl font-bold tracking-tight">
             {results.quizTitle}

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +58,20 @@ export default async function AttemptDetailPage({
     <div className="flex max-w-3xl flex-col gap-6">
       <div>
         <p className="text-muted-foreground text-sm">
-          Quizzes / Attempts / <span className="text-primary">Review</span>
+          <Link
+            href="/teacher/quizzes"
+            className="hover:text-foreground hover:underline"
+          >
+            Quizzes
+          </Link>{" "}
+          /{" "}
+          <Link
+            href={`/teacher/quizzes/${id}/attempts`}
+            className="hover:text-foreground hover:underline"
+          >
+            Attempts
+          </Link>{" "}
+          / <span className="text-primary">Review</span>
         </p>
         <h1 className="text-2xl font-bold tracking-tight">
           {attempt.studentName}
