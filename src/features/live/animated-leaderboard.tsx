@@ -15,7 +15,13 @@ import { cn } from "@/lib/utils";
 // flicker. `useSpring`/`useTransform` only drive a motion value, which doesn't itself trigger a
 // React re-render, so the `.on("change", ...)` subscription is what actually updates the
 // rendered digits each animation frame.
-function AnimatedScore({ value }: { value: number }) {
+export function AnimatedScore({
+  value,
+  className,
+}: {
+  value: number;
+  className?: string;
+}) {
   const motionValue = useMotionValue(value);
   const spring = useSpring(motionValue, { stiffness: 90, damping: 20 });
   const rounded = useTransform(spring, (latest) => Math.round(latest));
@@ -27,7 +33,9 @@ function AnimatedScore({ value }: { value: number }) {
 
   useEffect(() => rounded.on("change", setDisplay), [rounded]);
 
-  return <span className="font-mono font-semibold">{display}</span>;
+  return (
+    <span className={cn("font-mono font-semibold", className)}>{display}</span>
+  );
 }
 
 /** Shared by the host's between-questions leaderboard and each player's own (top-5) view — the

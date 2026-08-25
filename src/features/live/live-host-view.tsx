@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   ArrowRight,
-  Award,
   BarChart3,
   Check,
   CheckCircle2,
@@ -13,6 +19,7 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { Button } from "@/components/ui/button";
@@ -25,6 +32,17 @@ import type {
 } from "@/backend/live/live.schema";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
 import { AnimatedLeaderboardList } from "@/features/live/animated-leaderboard";
+import { ConfettiBurst } from "@/features/live/animations/confetti";
+import { CountdownEmphasis } from "@/features/live/animations/countdown-emphasis";
+import { LottieEffect } from "@/features/live/animations/lottie-effect";
+import { QuizStartSequence } from "@/features/live/animations/quiz-start-sequence";
+import {
+  correctPopVariants,
+  optionItemVariants,
+  optionListVariants,
+  questionCardVariants,
+  rosterItemVariants,
+} from "@/features/live/animations/variants";
 import {
   AVATAR_ICONS,
   getAvatarBadgeColor,
@@ -32,6 +50,14 @@ import {
 import { LeaderboardPodium } from "@/features/live/leaderboard-podium";
 import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { cn } from "@/lib/utils";
+
+// Lazy-loaded, client-only — see the matching comment in live-player-view.tsx for why a
+// canvas/WASM-backed library like this should never be part of an SSR pass.
+const RiveEffect = dynamic(
+  () =>
+    import("@/features/live/animations/rive-effect").then((m) => m.RiveEffect),
+  { ssr: false },
+);
 
 type Phase =
   "lobby" | "question" | "reveal" | "leaderboard" | "finished" | "cancelled";
@@ -57,12 +83,33 @@ export function LiveHostView({
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
-  // Lazy initializer (not a plain `window.location.origin` read, and not an effect) so this
-  // never touches `window` during the server render, same pattern as
-  // features/attempts/exam-attempt.tsx's `useFlaggedQuestions`.
-  const [origin] = useState(() =>
-    typeof window === "undefined" ? "" : window.location.origin,
+  // Purely cosmetic, local-only state — see the matching comment in live-player-view.tsx for
+  // why none of this ever feeds back into the real session/timer logic.
+  const [showStartSequence, setShowStartSequence] = useState(false);
+  const [revealBurst, setRevealBurst] = useState(0);
+  const [finishedBurst, setFinishedBurst] = useState(0);
+  const startSequenceShownRef = useRef(false);
+  const finishedCelebratedRef = useRef(false);
+  // `useSyncExternalStore`, not a lazy `useState` initializer reading `window` directly — the
+  // server snapshot ("") and the client's snapshot (the real origin) are allowed to differ by
+  // design here, which is exactly the mismatch a lazy initializer can't express safely: reading
+  // `window` directly in that initializer would make the client's very first (pre-hydration)
+  // render already disagree with the server about whether the QR-code block below exists at
+  // all — a hydration error severe enough that React discards and rebuilds this entire subtree
+  // (confirmed live: this was firing on every load of this page before this fix, tearing down
+  // and replaying every entrance animation in it along with it).
+  const origin = useSyncExternalStore(
+    () => () => {}, // nothing to subscribe to — the origin never changes for a loaded tab
+    () => window.location.origin,
+    () => "",
   );
+
+  // Warms the RiveEffect chunk during the idle lobby wait — see the matching comment in
+  // live-player-view.tsx for why a cold dynamic-import fetch would otherwise delay the trophy
+  // icon's entrance well past the rest of the "finished" screen's own animation.
+  useEffect(() => {
+    void import("@/features/live/animations/rive-effect");
+  }, []);
 
   useEffect(() => {
     const socket = getRealtimeSocket();
@@ -78,6 +125,10 @@ export function LiveHostView({
       setAnswered(0);
       setReveal(null);
       setPhase("question");
+      if (payload.questionIndex === 0 && !startSequenceShownRef.current) {
+        startSequenceShownRef.current = true;
+        setShowStartSequence(true);
+      }
     }
     function onAnswerCount(payload: { answered: number; total: number }) {
       setAnswered(payload.answered);
@@ -85,6 +136,7 @@ export function LiveHostView({
     function onReveal(payload: LiveRevealView) {
       setReveal(payload);
       setPhase("reveal");
+      setRevealBurst((n) => n + 1);
     }
     function onLeaderboard(payload: { top: LiveLeaderboardEntry[] }) {
       setLeaderboard(payload.top);
@@ -132,6 +184,13 @@ export function LiveHostView({
     return () => clearInterval(interval);
   }, [phase]);
 
+  // The one-shot "final results" celebration — guarded so a re-render never fires it twice.
+  useEffect(() => {
+    if (phase !== "finished" || finishedCelebratedRef.current) return;
+    finishedCelebratedRef.current = true;
+    setFinishedBurst((n) => n + 1);
+  }, [phase]);
+
   const remainingSeconds = useMemo(() => {
     if (!question) return 0;
     const elapsed = now - new Date(question.startedAt).getTime();
@@ -160,6 +219,12 @@ export function LiveHostView({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+      {showStartSequence && (
+        <QuizStartSequence onDone={() => setShowStartSequence(false)} />
+      )}
+      <ConfettiBurst trigger={revealBurst} />
+      <ConfettiBurst trigger={finishedBurst} />
+
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight">{quizTitle}</h1>
@@ -183,7 +248,12 @@ export function LiveHostView({
       )}
 
       {phase === "lobby" && (
-        <div className="border-border bg-card flex flex-col gap-6 rounded-2xl border p-6 sm:p-8">
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col gap-6 rounded-2xl border p-6 sm:p-8"
+        >
           <div className="sm:divide-border grid grid-cols-1 gap-6 sm:grid-cols-2 sm:divide-x">
             <div className="flex flex-col items-center gap-4 text-center">
               <div>
@@ -239,27 +309,34 @@ export function LiveHostView({
 
           {roster.length > 0 && (
             <div className="grid max-h-80 grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3 md:grid-cols-4">
-              {roster.map((r) => {
-                const Icon = AVATAR_ICONS[r.avatar];
-                return (
-                  <div
-                    key={r.participantId}
-                    className="border-border flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center"
-                  >
-                    <span
-                      className={cn(
-                        "flex size-10 shrink-0 items-center justify-center rounded-full text-white",
-                        getAvatarBadgeColor(r.participantId),
-                      )}
+              <AnimatePresence initial={false}>
+                {roster.map((r) => {
+                  const Icon = AVATAR_ICONS[r.avatar];
+                  return (
+                    <motion.div
+                      key={r.participantId}
+                      layout
+                      variants={rosterItemVariants}
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
+                      className="border-border flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center"
                     >
-                      <Icon className="size-5" />
-                    </span>
-                    <span className="w-full truncate text-xs font-medium">
-                      {r.name}
-                    </span>
-                  </div>
-                );
-              })}
+                      <span
+                        className={cn(
+                          "flex size-10 shrink-0 items-center justify-center rounded-full text-white",
+                          getAvatarBadgeColor(r.participantId),
+                        )}
+                      >
+                        <Icon className="size-5" />
+                      </span>
+                      <span className="w-full truncate text-xs font-medium">
+                        {r.name}
+                      </span>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
             </div>
           )}
 
@@ -272,28 +349,45 @@ export function LiveHostView({
             Start Game
             <ArrowRight className="size-4" />
           </Button>
-        </div>
+        </motion.div>
       )}
 
       {phase === "question" && question && (
-        <div className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6">
+        <motion.div
+          key={question.questionIndex}
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6"
+        >
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">
               Question {question.questionIndex + 1} of {question.totalQuestions}
             </span>
-            <span className="font-mono font-semibold">{remainingSeconds}s</span>
+            <CountdownEmphasis
+              seconds={remainingSeconds}
+              className="font-mono font-semibold"
+            >
+              {remainingSeconds}s
+            </CountdownEmphasis>
           </div>
           <Progress value={remainingPercent} className="h-2" />
           <p className="text-center text-lg font-semibold">{question.text}</p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <motion.div
+            variants={optionListVariants}
+            initial="initial"
+            animate="animate"
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
             {question.options.map((option, i) => {
               const { Icon, className } = getLiveOptionStyle(
                 question.questionIndex,
                 i,
               );
               return (
-                <div
+                <motion.div
                   key={option.id}
+                  variants={optionItemVariants}
                   className={cn(
                     "flex items-center gap-3 rounded-xl p-4 font-medium",
                     className,
@@ -301,10 +395,10 @@ export function LiveHostView({
                 >
                   <Icon className="size-5 shrink-0" />
                   {option.text}
-                </div>
+                </motion.div>
               );
             })}
-          </div>
+          </motion.div>
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground text-sm">
               {answered} of {roster.length} answered
@@ -317,13 +411,23 @@ export function LiveHostView({
               Reveal Now
             </Button>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {phase === "reveal" && reveal && question && (
-        <div className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6">
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6"
+        >
           <p className="text-center text-lg font-semibold">{question.text}</p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <motion.div
+            variants={optionListVariants}
+            initial="initial"
+            animate="animate"
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
             {question.options.map((option, i) => {
               const isCorrect = reveal.correctOptionIds.includes(option.id);
               const picks = reveal.distribution[option.id] ?? 0;
@@ -332,8 +436,10 @@ export function LiveHostView({
                 i,
               );
               return (
-                <div
+                <motion.div
                   key={option.id}
+                  variants={isCorrect ? correctPopVariants : optionItemVariants}
+                  animate={isCorrect ? "pop" : undefined}
                   className={cn(
                     "flex items-center justify-between gap-3 rounded-xl p-4 font-medium",
                     className,
@@ -346,10 +452,10 @@ export function LiveHostView({
                     {isCorrect && <CheckCircle2 className="size-4" />}
                   </span>
                   <span className="font-mono">{picks}</span>
-                </div>
+                </motion.div>
               );
             })}
-          </div>
+          </motion.div>
           <p className="text-muted-foreground text-center text-sm">
             {reveal.totalAnswered} of {reveal.totalParticipants} answered
           </p>
@@ -361,11 +467,16 @@ export function LiveHostView({
             <BarChart3 className="size-4" />
             Show Leaderboard
           </Button>
-        </div>
+        </motion.div>
       )}
 
       {phase === "leaderboard" && (
-        <div className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6">
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6"
+        >
           <h2 className="text-center text-lg font-semibold">Leaderboard</h2>
           {leaderboard.length === 0 ? (
             <p className="text-muted-foreground text-center text-sm">
@@ -382,30 +493,51 @@ export function LiveHostView({
             Next Question
             <ArrowRight className="size-4" />
           </Button>
-        </div>
+        </motion.div>
       )}
 
       {phase === "finished" && (
-        <div className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6">
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6"
+        >
           <div className="flex flex-col items-center gap-2 text-center">
-            <Award className="text-primary size-10" />
+            <motion.div
+              initial={{ scale: 0, rotate: -15 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{
+                type: "spring",
+                stiffness: 260,
+                damping: 16,
+                delay: 0.1,
+              }}
+            >
+              <RiveEffect fallback={<LottieEffect kind="trophy" size={56} />} />
+            </motion.div>
             <h2 className="text-lg font-semibold">Final Results</h2>
           </div>
           <LeaderboardPodium standings={standings} />
           <Button asChild size="lg" className="self-center">
             <Link href="/teacher/live">Back to Live Games</Link>
           </Button>
-        </div>
+        </motion.div>
       )}
 
       {phase === "cancelled" && (
-        <div className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center">
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center"
+        >
           <XCircle className="text-muted-foreground size-10" />
           <p className="text-lg font-semibold">This game was ended.</p>
           <Button asChild variant="secondary">
             <Link href="/teacher/live">Back to Live Games</Link>
           </Button>
-        </div>
+        </motion.div>
       )}
 
       {![

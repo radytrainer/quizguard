@@ -1,15 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import {
-  Award,
-  CheckCircle2,
-  Clock,
-  Radio,
-  Trophy,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, Clock, Radio, Trophy, XCircle } from "lucide-react";
+import { motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -20,11 +15,40 @@ import type {
   LiveStateSync,
   LiveYourResult,
 } from "@/backend/live/live.schema";
-import { AnimatedLeaderboardList } from "@/features/live/animated-leaderboard";
+import {
+  AnimatedLeaderboardList,
+  AnimatedScore,
+} from "@/features/live/animated-leaderboard";
+import { ConfettiBurst } from "@/features/live/animations/confetti";
+import { CountdownEmphasis } from "@/features/live/animations/countdown-emphasis";
+import { LottieEffect } from "@/features/live/animations/lottie-effect";
+import { QuizStartSequence } from "@/features/live/animations/quiz-start-sequence";
+import { ResultScoreCounter } from "@/features/live/animations/result-score-counter";
+import {
+  correctPopVariants,
+  optionItemVariants,
+  optionListVariants,
+  overlayVariants,
+  questionCardVariants,
+  wrongShakeVariants,
+} from "@/features/live/animations/variants";
 import { LeaderboardPodium } from "@/features/live/leaderboard-podium";
 import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
 import { cn } from "@/lib/utils";
+
+// @rive-app/react-canvas draws to a real <canvas> via a WASM-backed engine — lazy-loaded and
+// client-only (never server-rendered) rather than a plain import, both so its WASM payload
+// never ships as part of this page's initial bundle/SSR pass, and to sidestep any canvas/WASM
+// library's usual SSR fragility categorically rather than relying on today's version happening
+// to tolerate it. Every call site already only reaches this component well after hydration (the
+// "reveal"/"finished" phases only ever arrive via a live socket event, never on first paint), so
+// skipping SSR for it costs nothing visible.
+const RiveEffect = dynamic(
+  () =>
+    import("@/features/live/animations/rive-effect").then((m) => m.RiveEffect),
+  { ssr: false },
+);
 
 type Phase =
   | "connecting"
@@ -65,6 +89,17 @@ export function LivePlayerView({
   const [standings, setStandings] = useState<LiveLeaderboardEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Purely cosmetic, purely local state — never anything the realtime/business logic reads.
+  // `showStartSequence` gates the one-time "GET READY / 3 / 2 / 1 / GO!" overlay (see
+  // animations/quiz-start-sequence.tsx's own comment on why this never delays the real
+  // question/timer underneath). The two `*Burst` counters are "fire a confetti burst" signals —
+  // ConfettiBurst treats any change to the number as "go", so incrementing is enough; the value
+  // itself is never read for anything else.
+  const [showStartSequence, setShowStartSequence] = useState(false);
+  const [correctBurst, setCorrectBurst] = useState(0);
+  const [finishedBurst, setFinishedBurst] = useState(0);
+  const startSequenceShownRef = useRef(false);
+  const finishedCelebratedRef = useRef(false);
   // Persisted per session (not per game — a new sessionId always gets a fresh token) so a
   // guest's own tab reconnecting (a refresh, a brief network drop) resumes the same
   // participant row and score instead of joining as a second player. Never sent anywhere for
@@ -91,6 +126,16 @@ export function LivePlayerView({
   // inline banner over whatever phase we're already in.
   const hasJoinedRef = useRef(false);
 
+  // Warms the RiveEffect chunk during the idle lobby wait, well before the first "reveal" phase
+  // actually needs it — without this, the dynamic import's cold fetch+parse (confirmed live: on
+  // the order of a couple of seconds on a first load) delays that fallback icon's entrance well
+  // past the "Correct!"/confetti it's supposed to appear alongside. A plain `import()`, not the
+  // `dynamic()`-wrapped component itself — this only needs the module in the browser's cache
+  // before it's rendered, never rendering anything here.
+  useEffect(() => {
+    void import("@/features/live/animations/rive-effect");
+  }, []);
+
   useEffect(() => {
     const socket = getRealtimeSocket();
 
@@ -115,6 +160,9 @@ export function LivePlayerView({
       } else if (state.status === "question" && state.currentQuestion) {
         setQuestion(state.currentQuestion);
         setPhase(state.alreadyAnswered ? "answered" : "question");
+        if (state.currentQuestion.questionIndex === 0) {
+          startSequenceShownRef.current = true;
+        }
       } else if (state.status === "finished") {
         setPhase("finished");
       } else if (state.status === "cancelled") {
@@ -131,6 +179,12 @@ export function LivePlayerView({
       setCorrectOptionIds([]);
       setYourResult(null);
       setPhase("question");
+      // Only ever for the very first question of a game — see quiz-start-sequence.tsx for why
+      // this can render on top of the real countdown without touching it.
+      if (payload.questionIndex === 0 && !startSequenceShownRef.current) {
+        startSequenceShownRef.current = true;
+        setShowStartSequence(true);
+      }
     }
     function onAnswerAck() {
       setPhase("answered");
@@ -142,6 +196,7 @@ export function LivePlayerView({
     function onYourResult(payload: LiveYourResult) {
       setYourResult(payload);
       setTotalScore(payload.totalScore);
+      if (payload.isCorrect) setCorrectBurst((n) => n + 1);
     }
     function onLeaderboard(payload: { top: LiveLeaderboardEntry[] }) {
       setLeaderboardTop(payload.top);
@@ -196,6 +251,14 @@ export function LivePlayerView({
     return () => clearInterval(interval);
   }, [phase]);
 
+  // The one-shot final-results celebration — guarded so a re-render (or a reconnect that
+  // replays `live:finished`) never fires a second burst.
+  useEffect(() => {
+    if (phase !== "finished" || finishedCelebratedRef.current) return;
+    finishedCelebratedRef.current = true;
+    setFinishedBurst((n) => n + 1);
+  }, [phase]);
+
   const remainingSeconds = useMemo(() => {
     if (!question) return 0;
     const elapsed = now - new Date(question.startedAt).getTime();
@@ -239,6 +302,12 @@ export function LivePlayerView({
 
   return (
     <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
+      {showStartSequence && (
+        <QuizStartSequence onDone={() => setShowStartSequence(false)} />
+      )}
+      <ConfettiBurst trigger={correctBurst} />
+      <ConfettiBurst trigger={finishedBurst} />
+
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold tracking-tight">
@@ -247,7 +316,7 @@ export function LivePlayerView({
         </div>
         <div className="border-border bg-card flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-semibold">
           <Trophy className="text-primary size-4" />
-          {totalScore}
+          <AnimatedScore value={totalScore} />
         </div>
       </div>
 
@@ -270,25 +339,39 @@ export function LivePlayerView({
       )}
 
       {(phase === "connecting" || phase === "waiting") && (
-        <div className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center">
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center"
+        >
           <Radio className="text-primary size-8 animate-pulse" />
           <p className="font-medium">You&apos;re in!</p>
           <p className="text-muted-foreground text-sm">
             Waiting for the host to start the game…
           </p>
-        </div>
+        </motion.div>
       )}
 
       {(phase === "question" || phase === "answered") && question && (
-        <div className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6">
+        <motion.div
+          key={question.questionIndex}
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6"
+        >
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">
               Question {question.questionIndex + 1} of {question.totalQuestions}
             </span>
-            <span className="flex items-center gap-1 font-mono font-semibold">
+            <CountdownEmphasis
+              seconds={remainingSeconds}
+              className="flex items-center gap-1 font-mono font-semibold"
+            >
               <Clock className="size-3.5" />
               {remainingSeconds}s
-            </span>
+            </CountdownEmphasis>
           </div>
           <Progress value={remainingPercent} className="h-2" />
 
@@ -297,7 +380,12 @@ export function LivePlayerView({
               <p className="text-center text-lg font-semibold">
                 {question.text}
               </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <motion.div
+                variants={optionListVariants}
+                initial="initial"
+                animate="animate"
+                className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+              >
                 {question.options.map((option, i) => {
                   const { Icon, className } = getLiveOptionStyle(
                     question.questionIndex,
@@ -305,26 +393,33 @@ export function LivePlayerView({
                   );
                   const isSelected = selected.includes(option.id);
                   return (
-                    <button
+                    <motion.button
                       key={option.id}
                       type="button"
+                      variants={optionItemVariants}
+                      whileHover={{ scale: 1.03, y: -3 }}
+                      whileTap={{ scale: 0.95 }}
+                      animate={
+                        isSelected ? { scale: [1, 0.97, 1.02, 1] } : undefined
+                      }
+                      transition={{ duration: 0.32, ease: "easeInOut" }}
                       onClick={() =>
                         isMultiAnswer
                           ? toggleMulti(option.id)
                           : submitSingle(option.id)
                       }
                       className={cn(
-                        "flex items-center gap-3 rounded-xl p-5 text-left font-medium transition-transform active:scale-95",
+                        "flex items-center gap-3 rounded-xl p-5 text-left font-medium shadow-sm transition-shadow hover:shadow-lg",
                         className,
                         isSelected && "ring-foreground/60 ring-4",
                       )}
                     >
                       <Icon className="size-5 shrink-0" />
                       {option.text}
-                    </button>
+                    </motion.button>
                   );
                 })}
-              </div>
+              </motion.div>
               {isMultiAnswer && (
                 <Button onClick={submitMulti} disabled={selected.length === 0}>
                   Submit Answer
@@ -332,34 +427,51 @@ export function LivePlayerView({
               )}
             </>
           ) : (
-            <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: "spring", stiffness: 380, damping: 22 }}
+              className="flex flex-col items-center gap-3 py-8 text-center"
+            >
               <CheckCircle2 className="text-success size-10" />
               <p className="font-medium">Answer locked in!</p>
               <p className="text-muted-foreground text-sm">
                 Waiting for other players…
               </p>
-            </div>
+            </motion.div>
           )}
-        </div>
+        </motion.div>
       )}
 
       {phase === "reveal" && question && (
-        <div className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-8 text-center">
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-8 text-center"
+        >
           {yourResult?.isCorrect ? (
             <>
-              <CheckCircle2 className="text-success size-12" />
+              <RiveEffect
+                fallback={<LottieEffect kind="correct" size={64} />}
+              />
               <p className="text-xl font-bold">Correct!</p>
               <p className="text-muted-foreground text-sm">
                 +{yourResult.pointsAwarded} points
               </p>
             </>
           ) : (
-            <>
-              <XCircle className="text-destructive size-12" />
+            <motion.div
+              variants={wrongShakeVariants}
+              initial="initial"
+              animate="shake"
+              className="flex flex-col items-center gap-2"
+            >
+              <RiveEffect fallback={<LottieEffect kind="wrong" size={64} />} />
               <p className="text-xl font-bold">
                 {yourResult ? "Not quite" : "No answer submitted"}
               </p>
-            </>
+            </motion.div>
           )}
           <div className="mt-2 flex w-full flex-col gap-2">
             {question.options.map((option, i) => {
@@ -368,9 +480,25 @@ export function LivePlayerView({
                 i,
               );
               const isCorrect = correctOptionIds.includes(option.id);
+              const wasSelectedWrong =
+                selected.includes(option.id) && !isCorrect;
+              const feedbackMotionProps = isCorrect
+                ? {
+                    variants: correctPopVariants,
+                    initial: "initial",
+                    animate: "pop",
+                  }
+                : wasSelectedWrong
+                  ? {
+                      variants: wrongShakeVariants,
+                      initial: "initial",
+                      animate: "shake",
+                    }
+                  : {};
               return (
-                <div
+                <motion.div
                   key={option.id}
+                  {...feedbackMotionProps}
                   className={cn(
                     "flex items-center gap-3 rounded-xl p-3 text-left font-medium",
                     className,
@@ -380,43 +508,100 @@ export function LivePlayerView({
                   <Icon className="size-4 shrink-0" />
                   {option.text}
                   {isCorrect && <CheckCircle2 className="ml-auto size-4" />}
-                </div>
+                </motion.div>
               );
             })}
           </div>
-        </div>
+        </motion.div>
       )}
 
       {phase === "leaderboard" && (
-        <div className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6">
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col gap-5 rounded-2xl border p-6"
+        >
           <div className="flex flex-col items-center gap-1 text-center">
             <p className="text-muted-foreground text-sm">Your rank</p>
-            <p className="text-3xl font-bold">
+            <motion.p
+              key={yourRank ?? "none"}
+              initial={{ scale: 0.7, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 300, damping: 18 }}
+              className="text-3xl font-bold"
+            >
               {yourRank ? `#${yourRank}` : "—"}
-            </p>
+            </motion.p>
           </div>
           <AnimatedLeaderboardList entries={leaderboardTop} />
-        </div>
+        </motion.div>
       )}
 
       {phase === "finished" && (
-        <div className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-8 text-center">
-          <Award className="text-primary size-10" />
-          <p className="text-lg font-semibold">Game over!</p>
-          <p className="text-muted-foreground text-sm">
-            Final score: {totalScore}
-          </p>
-          {standings.length > 0 && <LeaderboardPodium standings={standings} />}
+        <motion.div
+          variants={questionCardVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-8 text-center"
+        >
+          <motion.div
+            initial={{ scale: 0, rotate: -15 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{
+              type: "spring",
+              stiffness: 260,
+              damping: 16,
+              delay: 0.1,
+            }}
+          >
+            <RiveEffect fallback={<LottieEffect kind="trophy" size={56} />} />
+          </motion.div>
+          <motion.p
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="text-lg font-semibold"
+          >
+            Game over!
+          </motion.p>
+          <motion.p
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="text-muted-foreground text-sm"
+          >
+            Final score:{" "}
+            <ResultScoreCounter
+              value={totalScore}
+              className="text-foreground font-mono font-semibold"
+            />
+          </motion.p>
+          {standings.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.6 }}
+              className="w-full"
+            >
+              <LeaderboardPodium standings={standings} />
+            </motion.div>
+          )}
           <Button asChild>
             <Link href={guestName ? "/play" : "/student"}>
               {guestName ? "Play another game" : "Back to Dashboard"}
             </Link>
           </Button>
-        </div>
+        </motion.div>
       )}
 
       {phase === "cancelled" && (
-        <div className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center">
+        <motion.div
+          variants={overlayVariants}
+          initial="initial"
+          animate="animate"
+          className="border-border bg-card flex flex-col items-center gap-4 rounded-2xl border p-10 text-center"
+        >
           <XCircle className="text-muted-foreground size-10" />
           <p className="font-medium">This game was ended by the host.</p>
           <Button asChild variant="secondary">
@@ -424,7 +609,7 @@ export function LivePlayerView({
               {guestName ? "Play another game" : "Back to Dashboard"}
             </Link>
           </Button>
-        </div>
+        </motion.div>
       )}
     </div>
   );
