@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { CheckCircle2, Clock, Radio, Trophy, XCircle } from "lucide-react";
 import { motion } from "motion/react";
@@ -36,19 +35,6 @@ import { LeaderboardPodium } from "@/features/live/leaderboard-podium";
 import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
 import { cn } from "@/lib/utils";
-
-// @rive-app/react-canvas draws to a real <canvas> via a WASM-backed engine — lazy-loaded and
-// client-only (never server-rendered) rather than a plain import, both so its WASM payload
-// never ships as part of this page's initial bundle/SSR pass, and to sidestep any canvas/WASM
-// library's usual SSR fragility categorically rather than relying on today's version happening
-// to tolerate it. Every call site already only reaches this component well after hydration (the
-// "reveal"/"finished" phases only ever arrive via a live socket event, never on first paint), so
-// skipping SSR for it costs nothing visible.
-const RiveEffect = dynamic(
-  () =>
-    import("@/features/live/animations/rive-effect").then((m) => m.RiveEffect),
-  { ssr: false },
-);
 
 type Phase =
   | "connecting"
@@ -125,16 +111,6 @@ export function LivePlayerView({
   // closed) — only the former should replace the whole screen instead of just showing an
   // inline banner over whatever phase we're already in.
   const hasJoinedRef = useRef(false);
-
-  // Warms the RiveEffect chunk during the idle lobby wait, well before the first "reveal" phase
-  // actually needs it — without this, the dynamic import's cold fetch+parse (confirmed live: on
-  // the order of a couple of seconds on a first load) delays that fallback icon's entrance well
-  // past the "Correct!"/confetti it's supposed to appear alongside. A plain `import()`, not the
-  // `dynamic()`-wrapped component itself — this only needs the module in the browser's cache
-  // before it's rendered, never rendering anything here.
-  useEffect(() => {
-    void import("@/features/live/animations/rive-effect");
-  }, []);
 
   useEffect(() => {
     const socket = getRealtimeSocket();
@@ -452,9 +428,7 @@ export function LivePlayerView({
         >
           {yourResult?.isCorrect ? (
             <>
-              <RiveEffect
-                fallback={<LottieEffect kind="correct" size={64} />}
-              />
+              <LottieEffect kind="correct" size={64} />
               <p className="text-xl font-bold">Correct!</p>
               <p className="text-muted-foreground text-sm">
                 +{yourResult.pointsAwarded} points
@@ -467,7 +441,7 @@ export function LivePlayerView({
               animate="shake"
               className="flex flex-col items-center gap-2"
             >
-              <RiveEffect fallback={<LottieEffect kind="wrong" size={64} />} />
+              <LottieEffect kind="wrong" size={64} />
               <p className="text-xl font-bold">
                 {yourResult ? "Not quite" : "No answer submitted"}
               </p>
@@ -555,7 +529,7 @@ export function LivePlayerView({
               delay: 0.1,
             }}
           >
-            <RiveEffect fallback={<LottieEffect kind="trophy" size={56} />} />
+            <LottieEffect kind="trophy" size={56} />
           </motion.div>
           <motion.p
             initial={{ opacity: 0, y: 6 }}

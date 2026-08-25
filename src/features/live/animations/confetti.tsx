@@ -23,10 +23,10 @@ const PARTICLE_COUNT = 36;
 /** A one-shot DOM+GSAP particle burst — deliberately not `canvas-confetti` or another package:
  * a few dozen absolutely-positioned divs animated with `transform`/`opacity` only (never
  * `top`/`left`, so this never triggers layout) is plenty for a single browser's own celebration
- * moment and keeps this feature's new dependencies to gsap/lottie-react/@rive-app/react-canvas,
- * nothing confetti-specific. Every particle's tween is tracked on one `gsap.timeline()` so a
- * re-trigger (or unmount) mid-burst can `.kill()` everything at once rather than leaking
- * dangling tweens — see the cleanup in the effect below. */
+ * moment and keeps this feature's new dependencies to just gsap/lottie-react, nothing
+ * confetti-specific. Every particle's tween is tracked on one `gsap.timeline()` so a re-trigger
+ * (or unmount) mid-burst can `.kill()` everything at once rather than leaking dangling tweens —
+ * see the cleanup in the effect below. */
 export function ConfettiBurst({ trigger }: { trigger: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const reducedMotion = usePrefersReducedMotion();

@@ -7,7 +7,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -50,14 +49,6 @@ import {
 import { LeaderboardPodium } from "@/features/live/leaderboard-podium";
 import { getLiveOptionStyle } from "@/features/live/option-styles";
 import { cn } from "@/lib/utils";
-
-// Lazy-loaded, client-only — see the matching comment in live-player-view.tsx for why a
-// canvas/WASM-backed library like this should never be part of an SSR pass.
-const RiveEffect = dynamic(
-  () =>
-    import("@/features/live/animations/rive-effect").then((m) => m.RiveEffect),
-  { ssr: false },
-);
 
 type Phase =
   "lobby" | "question" | "reveal" | "leaderboard" | "finished" | "cancelled";
@@ -103,13 +94,6 @@ export function LiveHostView({
     () => window.location.origin,
     () => "",
   );
-
-  // Warms the RiveEffect chunk during the idle lobby wait — see the matching comment in
-  // live-player-view.tsx for why a cold dynamic-import fetch would otherwise delay the trophy
-  // icon's entrance well past the rest of the "finished" screen's own animation.
-  useEffect(() => {
-    void import("@/features/live/animations/rive-effect");
-  }, []);
 
   useEffect(() => {
     const socket = getRealtimeSocket();
@@ -514,7 +498,7 @@ export function LiveHostView({
                 delay: 0.1,
               }}
             >
-              <RiveEffect fallback={<LottieEffect kind="trophy" size={56} />} />
+              <LottieEffect kind="trophy" size={56} />
             </motion.div>
             <h2 className="text-lg font-semibold">Final Results</h2>
           </div>
