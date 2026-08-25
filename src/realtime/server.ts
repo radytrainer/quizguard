@@ -47,6 +47,7 @@ import {
   REALTIME_CHANNEL,
   realtimeEventSchema,
 } from "@/backend/realtime/realtime-event.schema";
+import { ApiError } from "@/lib/api-response";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { examAttempts, type LiveSession } from "@/database/schema";
@@ -116,8 +117,16 @@ function scheduleAutoReveal(sessionId: string, delayMs: number) {
   );
 }
 
+/** Mirrors `apiErrorResponse`'s own discipline (src/lib/api-response.ts): an `ApiError` is a
+ * deliberate, safe-to-show message (`conflict("This game has already ended")` and the like,
+ * thrown throughout live.service.ts) — anything else is unexpected (a bug, a failed query) and
+ * must never reach a student's screen verbatim. A raw DB error string (e.g. a column missing
+ * after an incomplete migration) leaking through here was a real bug this fixes: logged
+ * server-side instead, with a generic message sent over the socket. */
 function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Something went wrong";
+  if (err instanceof ApiError) return err.message;
+  console.error(err);
+  return "Something went wrong";
 }
 
 // Sends each connected socket in the room only the slice of `byParticipantId` addressed to it
