@@ -28,8 +28,15 @@ import {
   liveJoinSchema,
 } from "@/backend/live/live.schema";
 import {
+  clearSessionCache,
+  getRosterCount,
+  incrAnsweredCount,
+  setRosterCount,
+} from "@/backend/live/live-cache";
+import {
   advanceQuestion,
   cancelSession,
+  countParticipants,
   getAnswerCount,
   getParticipantResults,
   getQuestionView,
@@ -129,6 +136,35 @@ function errorMessage(err: unknown): string {
   return "Something went wrong";
 }
 
+// Cache-aside helpers: prefer the Redis-backed counters (live-cache.ts) that every answer
+// otherwise pays a full PostgreSQL round trip for, falling back to the DB query they mirror on a
+// cache miss or a Redis outage — see live-cache.ts's own header for why that fallback never risks
+// scoring correctness, only the timing of the "reveal early" heuristic below.
+async function resolveAnsweredCount(
+  sessionId: string,
+  questionIndex: number,
+): Promise<number> {
+  const cached = await incrAnsweredCount(sessionId, questionIndex);
+  return cached ?? (await getAnswerCount(sessionId, questionIndex));
+}
+
+async function resolveRosterCount(sessionId: string): Promise<number> {
+  const cached = await getRosterCount(sessionId);
+  if (cached !== null) return cached;
+  const total = await countParticipants(sessionId);
+  await setRosterCount(sessionId, total);
+  return total;
+}
+
+// Guards against the exact same reveal running twice concurrently — e.g. several players'
+// answers all cross the "everyone's answered" threshold in the same tick, or that early check
+// races the auto-reveal timer. revealAnswer() was already safe to call twice (it only flips
+// status out of "question" once, so a second call just re-reads the same result) but still paid
+// for a full set of DB queries and a duplicate broadcast each time; this makes the redundant call
+// a no-op instead. Realtime server is single-process (see file header), so in-memory is enough —
+// same pattern as the `presence`/`revealTimers` maps above.
+const revealingSessions = new Set<string>();
+
 // Sends each connected socket in the room only the slice of `byParticipantId` addressed to it
 // (its own grade, its own rank) — every socket that joined via `live:join` carries its
 // participant id in `socket.data`, set at join time.
@@ -178,6 +214,8 @@ const io = new SocketIOServer(httpServer, {
 // for the same question (the timer and an early manual reveal can race); revealAnswer() itself
 // only flips status out of "question" once, so a second call just re-reads the same result.
 async function triggerReveal(sessionId: string) {
+  if (revealingSessions.has(sessionId)) return;
+  revealingSessions.add(sessionId);
   clearAutoReveal(sessionId);
   try {
     const reveal = await revealAnswer(sessionId);
@@ -195,6 +233,8 @@ async function triggerReveal(sessionId: string) {
     fanOutToParticipants(io, sessionId, withIndex, "live:your_result");
   } catch (err) {
     io.to(`live:${sessionId}`).emit("live:error", errorMessage(err));
+  } finally {
+    revealingSessions.delete(sessionId);
   }
 }
 
@@ -300,11 +340,17 @@ io.on("connection", (socket: Socket) => {
     socket.data.liveParticipantId = participantId;
     void socket.join(`live:${sessionId}`);
 
-    socket.emit(
-      "live:state_sync",
-      await getSessionState(sessionId, participantId),
-    );
-    io.to(`live:${sessionId}`).emit("live:roster", await getRoster(sessionId));
+    // Independent of each other — one round trip instead of two on every join/reconnect.
+    const [state, roster] = await Promise.all([
+      getSessionState(sessionId, participantId),
+      getRoster(sessionId),
+    ]);
+    socket.emit("live:state_sync", state);
+    io.to(`live:${sessionId}`).emit("live:roster", roster);
+    // This fresh fetch is the roster's one source of truth changing — repopulate the answer-count
+    // cache-aside's roster total from it now, so every answer for the rest of this question reads
+    // a Redis counter instead of re-fetching every participant row just for `.length`.
+    await setRosterCount(sessionId, roster.length);
   }
 
   socket.on("live:join", async (payload: unknown) => {
@@ -377,16 +423,16 @@ io.on("connection", (socket: Socket) => {
       // No correctness here — Kahoot never reveals it until every player's window has closed.
       socket.emit("live:answer_ack", { questionIndex });
 
-      const [answered, roster] = await Promise.all([
-        getAnswerCount(sessionId, questionIndex),
-        getRoster(sessionId),
+      const [answered, total] = await Promise.all([
+        resolveAnsweredCount(sessionId, questionIndex),
+        resolveRosterCount(sessionId),
       ]);
       io.to(`live:${sessionId}`).emit("live:answer_count", {
         answered,
-        total: roster.length,
+        total,
       });
       // Early reveal once everyone who joined has answered — no reason to wait out the clock.
-      if (roster.length > 0 && answered >= roster.length) {
+      if (total > 0 && answered >= total) {
         await triggerReveal(sessionId);
       }
     } catch (err) {
@@ -446,6 +492,7 @@ io.on("connection", (socket: Socket) => {
       const result = await advanceQuestion(session.id);
       if (result.finished) {
         clearAutoReveal(session.id);
+        await clearSessionCache(session.id, session.questionOrder.length);
         io.to(`live:${session.id}`).emit("live:finished", {
           standings: result.standings,
         });
@@ -466,6 +513,7 @@ io.on("connection", (socket: Socket) => {
 
     clearAutoReveal(session.id);
     await cancelSession(session.id);
+    await clearSessionCache(session.id, session.questionOrder.length);
     io.to(`live:${session.id}`).emit("live:ended", {});
   });
 });
