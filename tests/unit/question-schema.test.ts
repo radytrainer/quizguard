@@ -141,6 +141,166 @@ describe("questionInputSchema — short_answer / fill_in_blank", () => {
   });
 });
 
+describe("questionInputSchema — essay", () => {
+  it("accepts an empty options array", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "essay",
+      options: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects any options at all", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "essay",
+      options: [{ text: "anything" }],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("questionInputSchema — numeric_answer", () => {
+  it("accepts exactly one numeric accepted value with a tolerance", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "numeric_answer",
+      options: [{ text: "3.14" }],
+      numericTolerance: 0.01,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("defaults tolerance to 0 when omitted", () => {
+    const result = questionInputSchema.parse({
+      ...base,
+      type: "numeric_answer",
+      options: [{ text: "42" }],
+    });
+    if (result.type !== "numeric_answer") throw new Error("unreachable");
+    expect(result.numericTolerance).toBe(0);
+  });
+
+  it("rejects a non-numeric accepted value", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "numeric_answer",
+      options: [{ text: "forty-two" }],
+      numericTolerance: 0,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects more than one accepted value", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "numeric_answer",
+      options: [{ text: "42" }, { text: "43" }],
+      numericTolerance: 0,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a negative tolerance", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "numeric_answer",
+      options: [{ text: "42" }],
+      numericTolerance: -1,
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("questionInputSchema — code_answer", () => {
+  it("accepts python with at least one test case", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "code_answer",
+      options: [],
+      codeLanguage: "python",
+      testCases: [{ input: "3\n4\n", expectedOutput: "7", isSample: true }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects python/javascript with zero test cases", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "code_answer",
+      options: [],
+      codeLanguage: "javascript",
+      testCases: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects test cases on an html/css question", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "code_answer",
+      options: [],
+      codeLanguage: "html",
+      testCases: [{ input: "", expectedOutput: "x", isSample: true }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts html/css with no test cases at all (key omitted)", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "code_answer",
+      options: [],
+      codeLanguage: "html",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts previewHtml on a css question", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "code_answer",
+      options: [],
+      codeLanguage: "css",
+      previewHtml: "<button>Click me</button>",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects previewHtml on a non-css question", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "code_answer",
+      options: [],
+      codeLanguage: "python",
+      testCases: [{ input: "", expectedOutput: "x", isSample: true }],
+      previewHtml: "<div></div>",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects any question_options rows", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "code_answer",
+      options: [{ text: "anything" }],
+      codeLanguage: "html",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an invalid codeLanguage", () => {
+    const result = questionInputSchema.safeParse({
+      ...base,
+      type: "code_answer",
+      options: [],
+      codeLanguage: "ruby",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("questionInputSchema — shared field validation", () => {
   it("rejects an empty question text", () => {
     const result = questionInputSchema.safeParse({

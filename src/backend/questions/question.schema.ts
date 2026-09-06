@@ -1,6 +1,14 @@
 import { z } from "zod";
 
+import {
+  ALL_QUESTION_TYPES,
+  CODE_LANGUAGES,
+} from "@/backend/questions/question-types";
+
 const MAX_OPTIONS = 10;
+// Generous relative to MAX_OPTIONS — a real test suite for a coding exercise often needs more
+// rows than a multiple-choice question ever would.
+const MAX_TEST_CASES = 20;
 
 // `.optional()` left as the outermost modifier (not wrapped in `.transform()`) so these stay
 // optional *keys* in the inferred type, not required keys typed `string | undefined` — an
@@ -25,6 +33,33 @@ const choiceOption = z.object({
 // variant — there is no "mark as correct" toggle because all of them are correct by definition.
 const answerOption = z.object({
   text: z.string().trim().min(1, "Accepted answer is required").max(2000),
+});
+
+// numeric_answer: exactly one accepted value, but it must actually parse as a number — unlike
+// short_answer's free-text accepted variants.
+const numericAnswerOption = z.object({
+  text: z
+    .string()
+    .trim()
+    .min(1, "Accepted value is required")
+    .refine((v) => Number.isFinite(Number(v)), {
+      message: "Accepted value must be a number",
+    }),
+});
+
+// code_answer, python/javascript only — html/css never execute, so they never have rows here.
+// `input`/`expectedOutput` deliberately aren't `.trim()`-normalized on `input`: stdin
+// whitespace can be meaningful to a program the way it never is for an accepted text answer.
+const testCaseInput = z.object({
+  input: z.string().max(10000).default(""),
+  expectedOutput: z
+    .string()
+    .trim()
+    .min(1, "Expected output is required")
+    .max(10000),
+  // Visible to the student's own "Run" — a hidden (non-sample) row only ever executes
+  // server-side, at grading, and is never sent to the client (see execution.service.ts).
+  isSample: z.boolean().default(false),
 });
 
 function correctCount(options: { isCorrect: boolean }[]): number {
@@ -83,7 +118,60 @@ export const questionInputSchema = z.discriminatedUnion("type", [
       .min(1, "At least 1 accepted answer is required")
       .max(MAX_OPTIONS),
   }),
-]);
+  // No options at all — graded by a teacher reading the submitted prose, never by exact match.
+  z.object({
+    type: z.literal("essay"),
+    ...baseQuestionFields,
+    options: z.array(z.never()),
+  }),
+  z.object({
+    type: z.literal("numeric_answer"),
+    ...baseQuestionFields,
+    options: z
+      .array(numericAnswerOption)
+      .length(1, "Numeric answer needs exactly 1 accepted value"),
+    numericTolerance: z.number().min(0).default(0),
+  }),
+  // No question_options rows — same convention as essay. Cross-field rules (test cases only for
+  // executable languages, previewHtml only for css) live in the .superRefine() below, since a
+  // discriminated union's own per-branch object can't see sibling-field values as cleanly.
+  z.object({
+    type: z.literal("code_answer"),
+    ...baseQuestionFields,
+    options: z.array(z.never()),
+    codeLanguage: z.enum(CODE_LANGUAGES),
+    starterCode: z.string().max(20000).optional(),
+    // Teacher-only — never sent to a student. Optional: not every question needs a model answer.
+    referenceSolution: z.string().max(20000).optional(),
+    // codeLanguage: "css" only — the fixed HTML shell the student's CSS previews against.
+    previewHtml: z.string().max(20000).optional(),
+    testCases: z.array(testCaseInput).max(MAX_TEST_CASES).default([]),
+  }),
+]).superRefine((val, ctx) => {
+  if (val.type !== "code_answer") return;
+  const executable = val.codeLanguage === "python" || val.codeLanguage === "javascript";
+  if (executable && val.testCases.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["testCases"],
+      message: "At least 1 test case is required",
+    });
+  }
+  if (!executable && val.testCases.length > 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["testCases"],
+      message: "Test cases aren't used for html/css questions",
+    });
+  }
+  if (val.codeLanguage !== "css" && val.previewHtml) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["previewHtml"],
+      message: "previewHtml only applies to css questions",
+    });
+  }
+});
 
 export type QuestionInput = z.infer<typeof questionInputSchema>;
 
@@ -92,15 +180,7 @@ export const questionListQuerySchema = z.object({
   subject: z.string().trim().max(200).optional(),
   category: z.string().trim().max(200).optional(),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
-  type: z
-    .enum([
-      "multiple_choice",
-      "true_false",
-      "multiple_answer",
-      "short_answer",
-      "fill_in_blank",
-    ])
-    .optional(),
+  type: z.enum(ALL_QUESTION_TYPES).optional(),
   tag: z.string().trim().max(50).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),

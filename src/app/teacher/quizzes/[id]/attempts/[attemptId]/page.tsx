@@ -12,7 +12,18 @@ import {
 import { getCurrentUser } from "@/backend/auth/session";
 import { getAttemptDetailForTeacher } from "@/backend/monitoring/monitoring.service";
 import { getQuiz } from "@/backend/quizzes/quiz.service";
+import { needsManualGrading } from "@/backend/questions/question-types";
+import type { CodeLanguage } from "@/backend/questions/question-types";
+import type { QuestionType } from "@/database/schema";
 import { ApiError } from "@/lib/api-response";
+import { cn } from "@/lib/utils";
+import { GradeAnswerForm } from "@/features/grading/grade-answer-form";
+import { CodeEditor } from "@/features/code/code-editor";
+import {
+  buildCodePreviewSrcDoc,
+  SandboxedPreview,
+} from "@/features/code/sandboxed-preview";
+import { TestResultsTable } from "@/features/code/test-results-table";
 
 const STATUS_LABELS: Record<string, string> = {
   in_progress: "In progress",
@@ -163,6 +174,11 @@ export default async function AttemptDetailPage({
               question.options.filter((o) => o.isCorrect).map((o) => o.id),
             );
             const selected = new Set(question.answer?.selectedOptionIds ?? []);
+            const manuallyGraded = needsManualGrading({
+              type: question.type as QuestionType,
+              codeLanguage: question.codeLanguage,
+            });
+            const isCode = question.type === "code_answer";
 
             return (
               <div
@@ -176,8 +192,17 @@ export default async function AttemptDetailPage({
                     </span>
                     {question.text}
                   </p>
-                  <Badge variant="outline" className="shrink-0">
-                    {question.pointsAwarded ?? 0} / {question.points} pt
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "shrink-0",
+                      question.needsReview &&
+                        "border-warning/30 bg-warning/10 text-warning",
+                    )}
+                  >
+                    {question.needsReview
+                      ? "Pending review"
+                      : `${question.pointsAwarded ?? 0} / ${question.points} pt`}
                   </Badge>
                 </div>
                 <div className="mt-2 flex flex-col gap-1 pl-5 text-sm">
@@ -197,7 +222,7 @@ export default async function AttemptDetailPage({
                         {selected.has(option.id) && " (selected)"}
                       </div>
                     ))}
-                  {question.options.length === 0 && (
+                  {question.options.length === 0 && !isCode && !manuallyGraded && (
                     <p
                       className={
                         question.pointsAwarded
@@ -208,7 +233,49 @@ export default async function AttemptDetailPage({
                       {question.answer?.textAnswer || "(no answer)"}
                     </p>
                   )}
+                  {question.options.length === 0 && !isCode && manuallyGraded && (
+                    <p className="whitespace-pre-wrap">
+                      {question.answer?.textAnswer || "(no answer)"}
+                    </p>
+                  )}
+                  {isCode && question.codeLanguage && (
+                    <div className="flex flex-col gap-3">
+                      {question.answer?.textAnswer ? (
+                        <CodeEditor
+                          language={question.codeLanguage as CodeLanguage}
+                          value={question.answer.textAnswer}
+                          readOnly
+                        />
+                      ) : (
+                        <p className="text-muted-foreground">(no answer)</p>
+                      )}
+                      {(question.codeLanguage === "html" ||
+                        question.codeLanguage === "css") &&
+                        question.answer?.textAnswer && (
+                          <SandboxedPreview
+                            srcDoc={buildCodePreviewSrcDoc(
+                              question.codeLanguage,
+                              question.answer.textAnswer,
+                              question.previewHtml,
+                            )}
+                          />
+                        )}
+                      {!manuallyGraded && question.testResults && (
+                        <TestResultsTable results={question.testResults} />
+                      )}
+                    </div>
+                  )}
                 </div>
+                {manuallyGraded && (
+                  <GradeAnswerForm
+                    quizId={id}
+                    attemptId={attemptId}
+                    questionId={question.questionId}
+                    maxPoints={question.points}
+                    initialPointsAwarded={question.pointsAwarded ?? 0}
+                    initialFeedback={question.teacherFeedback ?? ""}
+                  />
+                )}
               </div>
             );
           })}

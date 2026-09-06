@@ -31,6 +31,15 @@ export const realtimeEventSchema = z.discriminatedUnion("type", [
     maxScore: z.number().nullable(),
     passed: z.boolean().nullable(),
   }),
+  // A teacher manually graded (or re-graded) one answer — answer.service.ts#gradeAnswer,
+  // recomputing the attempt's total the same way attempt_submitted's score/maxScore/passed do.
+  z.object({
+    type: z.literal("attempt_regraded"),
+    ...base,
+    score: z.number().nullable(),
+    maxScore: z.number().nullable(),
+    passed: z.boolean().nullable(),
+  }),
   z.object({
     type: z.literal("violation"),
     ...base,

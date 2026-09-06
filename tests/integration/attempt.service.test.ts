@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { saveAnswer } from "@/backend/answers/answer.service";
+import { gradeAnswer, saveAnswer } from "@/backend/answers/answer.service";
 import { createAssignment } from "@/backend/assignments/assignment.service";
 import {
   getAttempt,
@@ -51,7 +51,10 @@ describe("attempt.service + answer.service (integration)", () => {
   let mcCorrectOptionId: string;
   let mcWrongOptionId: string;
   let saQuestionId: string;
+  let essayQuestionId: string;
+  let numericQuestionId: string;
   let quizId: string;
+  let manualGradingQuizId: string;
 
   beforeAll(async () => {
     const passwordHash = await hashPassword("irrelevant");
@@ -137,6 +140,31 @@ describe("attempt.service + answer.service (integration)", () => {
     const saQuestion = await createQuestion(saInput, teacherId);
     saQuestionId = saQuestion.id;
 
+    const essayInput: QuestionInput = {
+      type: "essay",
+      subject: mcInput.subject,
+      text: "Explain how indexing improves query performance.",
+      tags: [],
+      points: 4,
+      difficulty: "easy",
+      options: [],
+    };
+    const essayQuestion = await createQuestion(essayInput, teacherId);
+    essayQuestionId = essayQuestion.id;
+
+    const numericInput: QuestionInput = {
+      type: "numeric_answer",
+      subject: mcInput.subject,
+      text: "What is the value of pi to 2 decimal places?",
+      tags: [],
+      points: 2,
+      difficulty: "easy",
+      options: [{ text: "3.14" }],
+      numericTolerance: 0.01,
+    };
+    const numericQuestion = await createQuestion(numericInput, teacherId);
+    numericQuestionId = numericQuestion.id;
+
     const quiz = await createQuiz(
       {
         title: `Attempt Quiz ${suffix}`,
@@ -163,6 +191,33 @@ describe("attempt.service + answer.service (integration)", () => {
     await setQuizQuestionPool(quizId, [mcQuestionId, saQuestionId], requester);
     await publishQuiz(quizId, requester);
     await createAssignment(quizId, { classId }, teacherId);
+
+    const manualGradingQuiz = await createQuiz(
+      {
+        title: `Manual Grading Quiz ${suffix}`,
+        subject: mcInput.subject,
+        durationMinutes: 30,
+        passingScore: 50,
+        maxAttempts: 5,
+        randomizeQuestions: false,
+        randomizeOptions: false,
+        fullscreenRequired: false,
+        monitorActivity: false,
+        autoSave: true,
+        autoSubmit: true,
+        showResults: true,
+        questionsPerAttempt: 2,
+      },
+      teacherId,
+    );
+    manualGradingQuizId = manualGradingQuiz.id;
+    await setQuizQuestionPool(
+      manualGradingQuizId,
+      [essayQuestionId, numericQuestionId],
+      requester,
+    );
+    await publishQuiz(manualGradingQuizId, requester);
+    await createAssignment(manualGradingQuizId, { classId }, teacherId);
   });
 
   afterAll(async () => {
@@ -484,5 +539,86 @@ describe("attempt.service + answer.service (integration)", () => {
     expect(reactivated.locked).toBe(false);
     const submitted = await submitAttempt(attempt.id, studentId);
     expect(submitted.status).toBe("submitted");
+  });
+
+  it("auto-grades numeric_answer, leaves essay pending review with a provisional score, then a teacher's grade updates the total", async () => {
+    const attempt = await startAttempt(manualGradingQuizId, studentId);
+    const active = await requireActiveAttemptForAnswering(
+      attempt.id,
+      studentId,
+    );
+    // Within the question's 0.01 tolerance of the accepted 3.14.
+    await saveAnswer(active, {
+      questionId: numericQuestionId,
+      textAnswer: "3.145",
+    });
+    await saveAnswer(active, {
+      questionId: essayQuestionId,
+      textAnswer: "Indexes let the query planner avoid a full table scan.",
+    });
+
+    const submitted = await submitAttempt(attempt.id, studentId);
+    expect(submitted.status).toBe("submitted");
+    // numeric_answer's 2 points auto-awarded; essay's 4 points sit at 0 until graded.
+    expect(submitted.score).toBe(2);
+    expect(submitted.maxScore).toBe(6);
+    expect(submitted.passed).toBe(false);
+
+    const provisionalView = await getAttempt(attempt.id, studentId);
+    expect(provisionalView.hasPendingReview).toBe(true);
+    const numericAnswer = provisionalView.questions.find(
+      (q) => q.questionId === numericQuestionId,
+    )?.answer;
+    expect(numericAnswer?.isCorrect).toBe(true);
+    expect(numericAnswer?.pointsAwarded).toBe(2);
+    const essayAnswerBefore = provisionalView.questions.find(
+      (q) => q.questionId === essayQuestionId,
+    )?.answer;
+    expect(essayAnswerBefore?.needsReview).toBe(true);
+    expect(essayAnswerBefore?.pointsAwarded).toBe(0);
+
+    await gradeAnswer(
+      manualGradingQuizId,
+      attempt.id,
+      essayQuestionId,
+      { pointsAwarded: 3, feedback: "Good, but missed covering write cost." },
+      teacherId,
+    );
+
+    const gradedView = await getAttempt(attempt.id, studentId);
+    expect(gradedView.hasPendingReview).toBe(false);
+    expect(gradedView.score).toBe(5);
+    expect(gradedView.maxScore).toBe(6);
+    expect(gradedView.passed).toBe(true);
+    const essayAnswerAfter = gradedView.questions.find(
+      (q) => q.questionId === essayQuestionId,
+    )?.answer;
+    expect(essayAnswerAfter?.needsReview).toBe(false);
+    expect(essayAnswerAfter?.pointsAwarded).toBe(3);
+    expect(essayAnswerAfter?.teacherFeedback).toBe(
+      "Good, but missed covering write cost.",
+    );
+  });
+
+  it("grades a numeric_answer outside tolerance as incorrect", async () => {
+    const attempt = await startAttempt(manualGradingQuizId, studentId);
+    const active = await requireActiveAttemptForAnswering(
+      attempt.id,
+      studentId,
+    );
+    await saveAnswer(active, {
+      questionId: numericQuestionId,
+      textAnswer: "3.2", // outside the 0.01 tolerance of 3.14
+    });
+
+    const submitted = await submitAttempt(attempt.id, studentId);
+    expect(submitted.score).toBe(0);
+
+    const view = await getAttempt(attempt.id, studentId);
+    const numericAnswer = view.questions.find(
+      (q) => q.questionId === numericQuestionId,
+    )?.answer;
+    expect(numericAnswer?.isCorrect).toBe(false);
+    expect(numericAnswer?.pointsAwarded).toBe(0);
   });
 });

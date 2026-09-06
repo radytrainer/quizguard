@@ -4,6 +4,8 @@ import { IMPORT_FIELDS } from "@/backend/imports/import-row.schema";
 import type { ParsedFile } from "@/backend/imports/csv-parser";
 
 const OPTION_LETTERS = ["a", "b", "c", "d"] as const;
+// Types whose options are all accepted-answer variants, not one "correct" pick among
+// distractors — options (not correctAnswer) is the source of truth for these.
 const ANSWER_TYPES = new Set(["short_answer", "fill_in_blank"]);
 
 interface JsonQuestionEntry {
@@ -11,6 +13,7 @@ interface JsonQuestionEntry {
   type?: unknown;
   options?: unknown;
   correctAnswer?: unknown;
+  tolerance?: unknown;
   subject?: unknown;
   category?: unknown;
   difficulty?: unknown;
@@ -50,6 +53,10 @@ function toFlatRow(entry: unknown): Record<string, string> {
         : "",
     explanation: asString(e.explanation),
     tags: Array.isArray(e.tags) ? e.tags.map(asString).join(", ") : "",
+    tolerance:
+      typeof e.tolerance === "number" && Number.isFinite(e.tolerance)
+        ? String(e.tolerance)
+        : "",
   };
 
   OPTION_LETTERS.forEach((letter, i) => {
@@ -64,6 +71,12 @@ function toFlatRow(entry: unknown): Record<string, string> {
     row.correct_answer = e.correctAnswer.map(asString).join(",");
   } else if (typeof e.correctAnswer === "string") {
     row.correct_answer = e.correctAnswer;
+  } else if (
+    typeof e.correctAnswer === "number" &&
+    Number.isFinite(e.correctAnswer)
+  ) {
+    // numeric_answer commonly comes through as a JSON number, not a string.
+    row.correct_answer = String(e.correctAnswer);
   } else {
     row.correct_answer = "";
   }

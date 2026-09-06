@@ -21,6 +21,7 @@ import {
   type LiveSessionParticipant,
 } from "@/database/schema";
 import { computeSpeedPoints } from "@/backend/live/live-scoring";
+import { QUESTION_TYPES } from "@/backend/questions/question-types";
 import {
   LIVE_AVATARS,
   LIVE_QUESTION_TYPES,
@@ -145,9 +146,12 @@ export async function createLiveSession(
     )
     .orderBy(quizQuestions.position);
   if (pool.length === 0) {
-    throw conflict(
-      "This quiz has no multiple-choice, true/false, or multiple-answer questions to host live",
-    );
+    const names = LIVE_QUESTION_TYPES.map((t) => QUESTION_TYPES[t].label);
+    const labels =
+      names.length > 1
+        ? `${names.slice(0, -1).join(", ")}, or ${names.at(-1)}`
+        : (names[0] ?? "");
+    throw conflict(`This quiz has no ${labels} questions to host live`);
   }
 
   const questionCount = Math.min(quiz.questionsPerAttempt, pool.length);
@@ -357,23 +361,26 @@ export async function submitAnswer(
   // Keyed by participantId (known since `live:join` succeeded, whichever path it came from)
   // rather than re-deriving it from a studentId — the one thing a guest participant doesn't
   // have — so this works identically for an authenticated student and a guest.
-  const [participant] = await db
-    .select()
-    .from(liveSessionParticipants)
-    .where(
-      and(
-        eq(liveSessionParticipants.id, participantId),
-        eq(liveSessionParticipants.sessionId, sessionId),
-      ),
-    )
-    .limit(1);
-  if (!participant) throw forbidden("Join the game before answering");
-
+  // Independent of each other (neither reads the other's result) — sequencing them was never a
+  // real dependency, just code order, so run them as one round trip instead of two.
   const questionId = session.questionOrder[questionIndex];
-  const optionRows = await db
-    .select()
-    .from(questionOptions)
-    .where(eq(questionOptions.questionId, questionId));
+  const [[participant], optionRows] = await Promise.all([
+    db
+      .select()
+      .from(liveSessionParticipants)
+      .where(
+        and(
+          eq(liveSessionParticipants.id, participantId),
+          eq(liveSessionParticipants.sessionId, sessionId),
+        ),
+      )
+      .limit(1),
+    db
+      .select()
+      .from(questionOptions)
+      .where(eq(questionOptions.questionId, questionId)),
+  ]);
+  if (!participant) throw forbidden("Join the game before answering");
 
   const correctIds = new Set(
     optionRows.filter((o) => o.isCorrect).map((o) => o.id),
@@ -436,35 +443,54 @@ export async function getAnswerCount(
   return row.total;
 }
 
+/** A cheap COUNT, unlike getRoster()'s full-row fetch — for callers (the realtime server's
+ * per-answer broadcast) that only need the number, not every participant's name/avatar. */
+export async function countParticipants(sessionId: string): Promise<number> {
+  const [row] = await db
+    .select({ total: count() })
+    .from(liveSessionParticipants)
+    .where(eq(liveSessionParticipants.sessionId, sessionId));
+  return row.total;
+}
+
 export async function revealAnswer(sessionId: string): Promise<LiveRevealView> {
   const session = await requireSession(sessionId);
   const index = session.currentQuestionIndex ?? 0;
-
-  if (session.status === "question") {
-    await db
-      .update(liveSessions)
-      .set({ status: "reveal", updatedAt: new Date() })
-      .where(eq(liveSessions.id, sessionId));
-  }
-
   const questionId = session.questionOrder[index];
-  const optionRows = await db
-    .select()
-    .from(questionOptions)
-    .where(eq(questionOptions.questionId, questionId));
+
+  // Four independent reads/writes (none consumes another's result) — one round trip instead of
+  // four serialized ones on every reveal, whether triggered by the timer, the host, or the
+  // "everyone's answered" early cutoff.
+  const [, optionRows, answers, [{ total: totalParticipants }]] =
+    await Promise.all([
+      session.status === "question"
+        ? db
+            .update(liveSessions)
+            .set({ status: "reveal", updatedAt: new Date() })
+            .where(eq(liveSessions.id, sessionId))
+        : Promise.resolve(undefined),
+      db
+        .select()
+        .from(questionOptions)
+        .where(eq(questionOptions.questionId, questionId)),
+      db
+        .select()
+        .from(liveSessionAnswers)
+        .where(
+          and(
+            eq(liveSessionAnswers.sessionId, sessionId),
+            eq(liveSessionAnswers.questionIndex, index),
+          ),
+        ),
+      db
+        .select({ total: count() })
+        .from(liveSessionParticipants)
+        .where(eq(liveSessionParticipants.sessionId, sessionId)),
+    ]);
+
   const correctOptionIds = optionRows
     .filter((o) => o.isCorrect)
     .map((o) => o.id);
-
-  const answers = await db
-    .select()
-    .from(liveSessionAnswers)
-    .where(
-      and(
-        eq(liveSessionAnswers.sessionId, sessionId),
-        eq(liveSessionAnswers.questionIndex, index),
-      ),
-    );
 
   const distribution: Record<string, number> = {};
   for (const answer of answers) {
@@ -472,11 +498,6 @@ export async function revealAnswer(sessionId: string): Promise<LiveRevealView> {
       distribution[optionId] = (distribution[optionId] ?? 0) + 1;
     }
   }
-
-  const [{ total: totalParticipants }] = await db
-    .select({ total: count() })
-    .from(liveSessionParticipants)
-    .where(eq(liveSessionParticipants.sessionId, sessionId));
 
   return {
     questionIndex: index,
@@ -620,48 +641,55 @@ export async function getSessionState(
   participantId: string,
 ): Promise<LiveStateSync> {
   const session = await requireSession(sessionId);
-  const [quiz] = await db
-    .select({ title: quizzes.title })
-    .from(quizzes)
-    .where(eq(quizzes.id, session.quizId))
-    .limit(1);
+
+  // Independent of each other — one round trip instead of two on every join/reconnect.
+  const [[quiz], [participant]] = await Promise.all([
+    db
+      .select({ title: quizzes.title })
+      .from(quizzes)
+      .where(eq(quizzes.id, session.quizId))
+      .limit(1),
+    db
+      .select({
+        id: liveSessionParticipants.id,
+        score: liveSessionParticipants.score,
+      })
+      .from(liveSessionParticipants)
+      .where(
+        and(
+          eq(liveSessionParticipants.sessionId, sessionId),
+          eq(liveSessionParticipants.id, participantId),
+        ),
+      )
+      .limit(1),
+  ]);
 
   let currentQuestion: LiveQuestionView | null = null;
   let alreadyAnswered = false;
 
-  const [participant] = await db
-    .select({
-      id: liveSessionParticipants.id,
-      score: liveSessionParticipants.score,
-    })
-    .from(liveSessionParticipants)
-    .where(
-      and(
-        eq(liveSessionParticipants.sessionId, sessionId),
-        eq(liveSessionParticipants.id, participantId),
-      ),
-    )
-    .limit(1);
-
   if (session.status === "question" && session.currentQuestionIndex !== null) {
-    currentQuestion = await getQuestionView(
-      session,
-      session.currentQuestionIndex,
-    );
-
-    if (participant) {
-      const [answer] = await db
-        .select({ id: liveSessionAnswers.id })
-        .from(liveSessionAnswers)
-        .where(
-          and(
-            eq(liveSessionAnswers.participantId, participant.id),
-            eq(liveSessionAnswers.questionIndex, session.currentQuestionIndex),
-          ),
-        )
-        .limit(1);
-      alreadyAnswered = Boolean(answer);
-    }
+    // Also independent of each other — the question view never depends on this particular
+    // participant's own answer row.
+    const [questionView, [answer]] = await Promise.all([
+      getQuestionView(session, session.currentQuestionIndex),
+      participant
+        ? db
+            .select({ id: liveSessionAnswers.id })
+            .from(liveSessionAnswers)
+            .where(
+              and(
+                eq(liveSessionAnswers.participantId, participant.id),
+                eq(
+                  liveSessionAnswers.questionIndex,
+                  session.currentQuestionIndex,
+                ),
+              ),
+            )
+            .limit(1)
+        : Promise.resolve([]),
+    ]);
+    currentQuestion = questionView;
+    alreadyAnswered = Boolean(answer);
   }
 
   return {

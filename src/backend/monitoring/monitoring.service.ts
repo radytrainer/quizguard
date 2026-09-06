@@ -23,6 +23,7 @@ import {
   type ViolationType,
 } from "@/database/schema";
 import type { RecordViolationInput } from "@/backend/monitoring/monitoring.schema";
+import type { TestCaseResult } from "@/backend/execution/execution.service";
 
 /** Records the violation, and — for a fullscreen exit on a quiz that requires fullscreen, or a
  * tab switch on a quiz with activity monitoring on — locks the attempt so no further
@@ -307,6 +308,12 @@ export interface AttemptDetailQuestion {
   text: string;
   points: number;
   pointsAwarded: number | null;
+  needsReview: boolean;
+  teacherFeedback: string | null;
+  // code_answer only.
+  codeLanguage: string | null;
+  previewHtml: string | null;
+  testResults: TestCaseResult[] | null;
   options: { id: string; text: string; isCorrect: boolean }[];
   answer: {
     selectedOptionIds: string[] | null;
@@ -361,6 +368,8 @@ export async function getAttemptDetailForTeacher(
       type: questions.type,
       text: questions.text,
       points: questions.points,
+      codeLanguage: questions.codeLanguage,
+      previewHtml: questions.previewHtml,
     })
     .from(examAttemptQuestions)
     .innerJoin(questions, eq(questions.id, examAttemptQuestions.questionId))
@@ -413,6 +422,13 @@ export async function getAttemptDetailForTeacher(
       text: row.text,
       points: row.points,
       pointsAwarded: answer?.pointsAwarded ?? null,
+      needsReview: answer?.needsReview ?? false,
+      teacherFeedback: answer?.teacherFeedback ?? null,
+      codeLanguage: row.codeLanguage,
+      previewHtml: row.previewHtml,
+      // jsonb column, typed `unknown` by Drizzle — answer.service.ts#gradeAttempt is the only
+      // writer and its shape is always this or null.
+      testResults: (answer?.testResults as TestCaseResult[] | null) ?? null,
       options: orderedOptions.map((o) => ({
         id: o.id,
         text: o.text,

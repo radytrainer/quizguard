@@ -29,6 +29,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  ALL_QUESTION_TYPES,
+  QUESTION_TYPES,
+} from "@/backend/questions/question-types";
+import type { QuestionType } from "@/database/schema";
 
 interface QuestionListItem {
   id: string;
@@ -53,13 +58,9 @@ interface Facets {
   categories: string[];
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  multiple_choice: "Multiple Choice",
-  true_false: "True/False",
-  multiple_answer: "Multiple Answer",
-  short_answer: "Short Answer",
-  fill_in_blank: "Fill in the Blank",
-};
+function typeLabel(type: string): string {
+  return QUESTION_TYPES[type as QuestionType]?.label ?? type;
+}
 
 const DIFFICULTY_STYLES: Record<string, string> = {
   easy: "border-success/30 bg-success/10 text-success",
@@ -328,9 +329,9 @@ export function QuestionList() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All types</SelectItem>
-            {Object.entries(TYPE_LABELS).map(([value, label]) => (
+            {ALL_QUESTION_TYPES.map((value) => (
               <SelectItem key={value} value={value}>
-                {label}
+                {QUESTION_TYPES[value].label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -459,7 +460,7 @@ export function QuestionList() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline">{TYPE_LABELS[item.type]}</Badge>
+                    <Badge variant="outline">{typeLabel(item.type)}</Badge>
                   </TableCell>
                   <TableCell>
                     <Badge

@@ -15,9 +15,11 @@ import { forbidden, notFound } from "@/lib/api-response";
 import { db } from "@/lib/db";
 import {
   questionOptions,
+  questionTestCases,
   questions,
   type Question,
   type QuestionOption,
+  type QuestionTestCase,
 } from "@/database/schema";
 import type { AuthUser } from "@/backend/auth/session";
 import type {
@@ -28,6 +30,7 @@ import { assertOwner } from "@/backend/shared/ownership";
 
 export interface QuestionWithOptions extends Question {
   options: QuestionOption[];
+  testCases: QuestionTestCase[];
 }
 
 export interface QuestionListItem {
@@ -54,6 +57,13 @@ function normalizeOptional(value: string | undefined): string | null {
   return value ? value : null;
 }
 
+// numericTolerance only exists on the numeric_answer branch of the discriminated union — every
+// other type stores null, same "only this type populates this column" convention as
+// questions.ts's code_answer columns.
+function numericToleranceOf(input: QuestionInput): number | null {
+  return input.type === "numeric_answer" ? input.numericTolerance : null;
+}
+
 function toOptionRows(input: QuestionInput, questionId: string) {
   return input.options.map((option, index) => ({
     questionId,
@@ -61,6 +71,36 @@ function toOptionRows(input: QuestionInput, questionId: string) {
     // Choice types carry isCorrect; answer types (short_answer/fill_in_blank) don't — every
     // entry there is an accepted answer, so it's correct by definition.
     isCorrect: "isCorrect" in option ? option.isCorrect : true,
+    position: index,
+  }));
+}
+
+// code_answer's four extra columns only exist on that branch of the discriminated union —
+// every other type stores all four as null, same convention as numericToleranceOf above.
+function codeAnswerFieldsOf(input: QuestionInput) {
+  if (input.type !== "code_answer") {
+    return {
+      codeLanguage: null,
+      starterCode: null,
+      previewHtml: null,
+      referenceSolution: null,
+    };
+  }
+  return {
+    codeLanguage: input.codeLanguage,
+    starterCode: normalizeOptional(input.starterCode),
+    previewHtml: normalizeOptional(input.previewHtml),
+    referenceSolution: normalizeOptional(input.referenceSolution),
+  };
+}
+
+function toTestCaseRows(input: QuestionInput, questionId: string) {
+  if (input.type !== "code_answer") return [];
+  return input.testCases.map((testCase, index) => ({
+    questionId,
+    input: testCase.input,
+    expectedOutput: testCase.expectedOutput,
+    isSample: testCase.isSample,
     position: index,
   }));
 }
@@ -81,16 +121,28 @@ export async function createQuestion(
         text: input.text,
         explanation: normalizeOptional(input.explanation),
         tags: input.tags,
+        numericTolerance: numericToleranceOf(input),
+        ...codeAnswerFieldsOf(input),
         createdBy: authorId,
       })
       .returning();
 
-    const options = await tx
-      .insert(questionOptions)
-      .values(toOptionRows(input, question.id))
-      .returning();
+    // essay/code_answer have zero options by construction (question.schema.ts's discriminated
+    // union enforces it) — Drizzle's .values() rejects an empty array outright, so skip the
+    // insert entirely rather than pass one. Same guard applies to test cases below.
+    const rows = toOptionRows(input, question.id);
+    const options =
+      rows.length > 0
+        ? await tx.insert(questionOptions).values(rows).returning()
+        : [];
 
-    return { ...question, options };
+    const testCaseRows = toTestCaseRows(input, question.id);
+    const testCases =
+      testCaseRows.length > 0
+        ? await tx.insert(questionTestCases).values(testCaseRows).returning()
+        : [];
+
+    return { ...question, options, testCases };
   });
 }
 
@@ -117,7 +169,16 @@ export async function getQuestion(
     .where(eq(questionOptions.questionId, id))
     .orderBy(questionOptions.position);
 
-  return { ...question, options };
+  // Includes hidden (non-sample) rows and the teacher-only referenceSolution column (already
+  // selected via `select()` above) — safe here because this whole function is ownership-checked
+  // and only ever reached from a teacher/admin-facing path, never a student one.
+  const testCases = await db
+    .select()
+    .from(questionTestCases)
+    .where(eq(questionTestCases.questionId, id))
+    .orderBy(questionTestCases.position);
+
+  return { ...question, options, testCases };
 }
 
 export async function updateQuestion(
@@ -150,20 +211,32 @@ export async function updateQuestion(
         text: input.text,
         explanation: normalizeOptional(input.explanation),
         tags: input.tags,
+        numericTolerance: numericToleranceOf(input),
+        ...codeAnswerFieldsOf(input),
         updatedAt: new Date(),
       })
       .where(eq(questions.id, id))
       .returning();
 
-    // Replace-all rather than diff: a question has at most ~10 options, so this is simpler
-    // and just as correct as computing an add/update/remove set.
+    // Replace-all rather than diff: a question has at most ~10 options (or ~20 test cases), so
+    // this is simpler and just as correct as computing an add/update/remove set.
     await tx.delete(questionOptions).where(eq(questionOptions.questionId, id));
-    const options = await tx
-      .insert(questionOptions)
-      .values(toOptionRows(input, id))
-      .returning();
+    const rows = toOptionRows(input, id);
+    const options =
+      rows.length > 0
+        ? await tx.insert(questionOptions).values(rows).returning()
+        : [];
 
-    return { ...question, options };
+    await tx
+      .delete(questionTestCases)
+      .where(eq(questionTestCases.questionId, id));
+    const testCaseRows = toTestCaseRows(input, id);
+    const testCases =
+      testCaseRows.length > 0
+        ? await tx.insert(questionTestCases).values(testCaseRows).returning()
+        : [];
+
+    return { ...question, options, testCases };
   });
 }
 

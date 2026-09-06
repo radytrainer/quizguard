@@ -11,14 +11,17 @@ const optionalString = () =>
   );
 
 /**
- * Vars beyond NODE_ENV/DATABASE_URL/REDIS_URL are optional here because nothing reads them
- * yet — they become required in the phase that introduces their feature. Phase 1 sessions are
- * opaque Redis-backed tokens (see backend/auth/session.ts), not signed/encrypted cookies, so
- * AUTH_SECRET has no consumer yet. GOOGLE_CLIENT_* is Phase 5 (Sheets import), SENTRY_DSN is
- * Phase 11. APP_URL/REALTIME_PORT/NEXT_PUBLIC_REALTIME_URL are Phase 9 (see
- * docs/ARCHITECTURE.md — Section 12: the realtime server is a separate Node process, not
- * something Next's `output: "standalone"` build can host in-process, so it needs its own
- * origin/port for CORS and for the browser to connect to).
+ * The still-optional vars below are optional because nothing reads them yet — they become
+ * required (like DATABASE_URL/REDIS_URL/PISTON_URL already are) in the phase that introduces
+ * their feature. Phase 1 sessions are opaque Redis-backed tokens (see backend/auth/session.ts),
+ * not signed/encrypted cookies, so AUTH_SECRET has no consumer yet. GOOGLE_CLIENT_* is Phase 5
+ * (Sheets import), SENTRY_DSN is Phase 11. APP_URL/REALTIME_PORT/NEXT_PUBLIC_REALTIME_URL are
+ * Phase 9 (see docs/ARCHITECTURE.md — Section 12: the realtime server is a separate Node
+ * process, not something Next's `output: "standalone"` build can host in-process, so it needs
+ * its own origin/port for CORS and for the browser to connect to). PISTON_URL is Phase 16
+ * (code_answer questions, self-hosted Piston — see docker-compose.yml's `piston` service);
+ * unlike the others, src/backend/execution/ already depends on it unconditionally, so it's
+ * required from the start rather than easing in optional.
  */
 export const envSchema = z.object({
   NODE_ENV: z
@@ -32,6 +35,9 @@ export const envSchema = z.object({
   SENTRY_DSN: optionalString(),
   APP_URL: z.string().min(1).default("http://localhost:3000"),
   REALTIME_PORT: z.coerce.number().int().min(1).default(4001),
+  // code_answer execution (Phase 16) — self-hosted Piston (docker-compose.yml's `piston`
+  // service). src/backend/execution/ depends on it unconditionally.
+  PISTON_URL: z.string().min(1, "PISTON_URL is required"),
 });
 
 export type Env = z.infer<typeof envSchema>;

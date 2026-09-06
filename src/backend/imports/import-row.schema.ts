@@ -1,9 +1,11 @@
 import { questionInputSchema } from "@/backend/questions/question.schema";
 import type { QuestionInput } from "@/backend/questions/question.schema";
+import { IMPORTABLE_QUESTION_TYPES } from "@/backend/questions/question-types";
 
 /** Canonical fields a source row can map to — the example columns from Section 8, extended
- * with `type`/`tags`/`explanation` so all 5 question types are reachable, not just
- * multiple choice. */
+ * with `type`/`tags`/`explanation`/`tolerance` so every importable question type is reachable
+ * (code_answer is not — see question-types.ts's autoImportable flag — its source code and
+ * structured test cases don't fit a flat spreadsheet row). */
 export const IMPORT_FIELDS = [
   "question",
   "type",
@@ -12,6 +14,7 @@ export const IMPORT_FIELDS = [
   "option_c",
   "option_d",
   "correct_answer",
+  "tolerance",
   "points",
   "subject",
   "category",
@@ -28,13 +31,9 @@ export type ColumnMapping = Partial<Record<ImportField, string | null>>;
 
 const OPTION_FIELDS = ["option_a", "option_b", "option_c", "option_d"] as const;
 const OPTION_LETTERS = ["a", "b", "c", "d"] as const;
-const VALID_TYPES = new Set<QuestionInput["type"]>([
-  "multiple_choice",
-  "true_false",
-  "multiple_answer",
-  "short_answer",
-  "fill_in_blank",
-]);
+const VALID_TYPES = new Set<QuestionInput["type"]>(
+  IMPORTABLE_QUESTION_TYPES as QuestionInput["type"][],
+);
 const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard"]);
 
 /** Best-effort exact-or-normalized match between a file's actual headers and our canonical
@@ -103,7 +102,20 @@ export function parseImportRow(
   })).filter((o) => o.text);
 
   const correctAnswerRaw = getField(raw, mapping, "correct_answer");
-  if (!correctAnswerRaw) errors.push("Missing answer");
+  // essay has no single correct answer — a teacher grades each submission by hand, so an
+  // absent correct_answer column (or any value in it) is fine and simply ignored below.
+  if (!correctAnswerRaw && type !== "essay") errors.push("Missing answer");
+
+  const toleranceRaw = getField(raw, mapping, "tolerance");
+  let numericTolerance = 0;
+  if (toleranceRaw) {
+    const parsed = Number(toleranceRaw);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      errors.push(`Invalid tolerance "${toleranceRaw}"`);
+    } else {
+      numericTolerance = parsed;
+    }
+  }
 
   const pointsRaw = getField(raw, mapping, "points");
   let points = 1;
@@ -153,7 +165,10 @@ export function parseImportRow(
   };
 
   let questionOptions: { text: string; isCorrect?: boolean }[] = [];
-  if (correctAnswerRaw && VALID_TYPES.has(type)) {
+  if (type === "essay") {
+    // No options at all, regardless of anything in correct_answer — graded manually.
+    questionOptions = [];
+  } else if (correctAnswerRaw && VALID_TYPES.has(type)) {
     if (type === "multiple_choice" || type === "true_false") {
       const matched = options.find((o) => matchesOption(correctAnswerRaw, o));
       if (!matched) {
@@ -180,6 +195,13 @@ export function parseImportRow(
         text: o.text,
         isCorrect: matchedOptions.has(o),
       }));
+    } else if (type === "numeric_answer") {
+      // Same "value directly in the column" convention as short_answer below, but it must
+      // actually parse as a number.
+      if (!Number.isFinite(Number(correctAnswerRaw))) {
+        errors.push(`Invalid correct answer "${correctAnswerRaw}"`);
+      }
+      questionOptions = [{ text: correctAnswerRaw }];
     } else {
       // short_answer / fill_in_blank: correct_answer holds the accepted text(s) directly,
       // not a letter — semicolon-separated for multiple acceptable variants.
@@ -205,6 +227,7 @@ export function parseImportRow(
     explanation,
     tags,
     options: questionOptions,
+    ...(type === "numeric_answer" ? { numericTolerance } : {}),
   });
 
   if (!parsed.success) {

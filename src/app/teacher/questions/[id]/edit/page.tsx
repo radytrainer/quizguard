@@ -49,6 +49,16 @@ export default async function EditQuestionPage({
             text: o.text,
             isCorrect: o.isCorrect,
           })),
+          numericTolerance: question.numericTolerance,
+          codeLanguage: question.codeLanguage,
+          starterCode: question.starterCode,
+          referenceSolution: question.referenceSolution,
+          previewHtml: question.previewHtml,
+          testCases: question.testCases.map((tc) => ({
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            isSample: tc.isSample,
+          })),
         }}
       />
     </div>

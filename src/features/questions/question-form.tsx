@@ -20,33 +20,37 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { questionInputSchema } from "@/backend/questions/question.schema";
+import {
+  ALL_QUESTION_TYPES,
+  CODE_LANGUAGES,
+  QUESTION_TYPES,
+  type CodeLanguage,
+} from "@/backend/questions/question-types";
+import type { QuestionType } from "@/database/schema";
+import { CodeEditor } from "@/features/code/code-editor";
 
-type QuestionType =
-  | "multiple_choice"
-  | "true_false"
-  | "multiple_answer"
-  | "short_answer"
-  | "fill_in_blank";
+const DEFAULT_NUMERIC_TOLERANCE = 0;
+const DEFAULT_CODE_LANGUAGE: CodeLanguage = "python";
 
-const TYPE_LABELS: Record<QuestionType, string> = {
-  multiple_choice: "Multiple Choice",
-  true_false: "True/False",
-  multiple_answer: "Multiple Answer",
-  short_answer: "Short Answer",
-  fill_in_blank: "Fill in the Blank",
-};
-
-// Types where the client marks correctness per option; the other two (short_answer,
-// fill_in_blank) collect accepted-answer text only — every entry is correct by definition.
-const CHOICE_TYPES = new Set<QuestionType>([
-  "multiple_choice",
-  "true_false",
-  "multiple_answer",
-]);
+function isExecutableLanguage(language: CodeLanguage): boolean {
+  return language === "python" || language === "javascript";
+}
 
 interface OptionState {
   text: string;
   isCorrect: boolean;
+}
+
+interface TestCaseState {
+  input: string;
+  expectedOutput: string;
+  isSample: boolean;
+}
+
+function defaultTestCasesFor(language: CodeLanguage): TestCaseState[] {
+  return isExecutableLanguage(language)
+    ? [{ input: "", expectedOutput: "", isSample: true }]
+    : [];
 }
 
 interface FormState {
@@ -59,6 +63,12 @@ interface FormState {
   explanation: string;
   tags: string[];
   options: OptionState[];
+  numericTolerance: number;
+  codeLanguage: CodeLanguage;
+  starterCode: string;
+  referenceSolution: string;
+  previewHtml: string;
+  testCases: TestCaseState[];
 }
 
 function defaultOptionsFor(type: QuestionType): OptionState[] {
@@ -68,8 +78,12 @@ function defaultOptionsFor(type: QuestionType): OptionState[] {
         { text: "True", isCorrect: false },
         { text: "False", isCorrect: false },
       ];
+    case "essay":
+    case "code_answer":
+      return [];
     case "short_answer":
     case "fill_in_blank":
+    case "numeric_answer":
       return [{ text: "", isCorrect: true }];
     default:
       return [
@@ -90,6 +104,12 @@ export interface QuestionFormInitialData {
   explanation: string | null;
   tags: string[];
   options: { text: string; isCorrect: boolean }[];
+  numericTolerance: number | null;
+  codeLanguage: CodeLanguage | null;
+  starterCode: string | null;
+  referenceSolution: string | null;
+  previewHtml: string | null;
+  testCases: { input: string; expectedOutput: string; isSample: boolean }[];
 }
 
 export function QuestionForm({
@@ -110,6 +130,13 @@ export function QuestionForm({
           explanation: initialData.explanation ?? "",
           tags: initialData.tags,
           options: initialData.options,
+          numericTolerance:
+            initialData.numericTolerance ?? DEFAULT_NUMERIC_TOLERANCE,
+          codeLanguage: initialData.codeLanguage ?? DEFAULT_CODE_LANGUAGE,
+          starterCode: initialData.starterCode ?? "",
+          referenceSolution: initialData.referenceSolution ?? "",
+          previewHtml: initialData.previewHtml ?? "",
+          testCases: initialData.testCases,
         }
       : {
           type: "multiple_choice",
@@ -121,6 +148,12 @@ export function QuestionForm({
           explanation: "",
           tags: [],
           options: defaultOptionsFor("multiple_choice"),
+          numericTolerance: DEFAULT_NUMERIC_TOLERANCE,
+          codeLanguage: DEFAULT_CODE_LANGUAGE,
+          starterCode: "",
+          referenceSolution: "",
+          previewHtml: "",
+          testCases: [],
         },
   );
   const [tagDraft, setTagDraft] = useState("");
@@ -128,12 +161,71 @@ export function QuestionForm({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const isChoiceType = CHOICE_TYPES.has(form.type);
+  const isChoiceType = QUESTION_TYPES[form.type].isChoice;
   const isSingleCorrect =
     form.type === "multiple_choice" || form.type === "true_false";
+  const isEssay = form.type === "essay";
+  const isNumeric = form.type === "numeric_answer";
+  const isCode = form.type === "code_answer";
+  const isCodeExecutable = isCode && isExecutableLanguage(form.codeLanguage);
 
   function handleTypeChange(type: QuestionType) {
-    setForm((prev) => ({ ...prev, type, options: defaultOptionsFor(type) }));
+    setForm((prev) => ({
+      ...prev,
+      type,
+      options: defaultOptionsFor(type),
+      numericTolerance:
+        type === "numeric_answer"
+          ? prev.numericTolerance
+          : DEFAULT_NUMERIC_TOLERANCE,
+      codeLanguage: type === "code_answer" ? prev.codeLanguage : DEFAULT_CODE_LANGUAGE,
+      testCases:
+        type === "code_answer"
+          ? defaultTestCasesFor(prev.codeLanguage)
+          : [],
+    }));
+  }
+
+  function handleCodeLanguageChange(language: CodeLanguage) {
+    setForm((prev) => ({
+      ...prev,
+      codeLanguage: language,
+      // The Zod schema forbids test cases on html/css and requires >=1 on python/javascript —
+      // reset here so switching languages can never leave the form in a state that would fail
+      // that rule on submit.
+      testCases: isExecutableLanguage(language)
+        ? prev.testCases.length > 0
+          ? prev.testCases
+          : defaultTestCasesFor(language)
+        : [],
+      previewHtml: language === "css" ? prev.previewHtml : "",
+    }));
+  }
+
+  function addTestCase() {
+    setForm((prev) => ({
+      ...prev,
+      testCases: [
+        ...prev.testCases,
+        { input: "", expectedOutput: "", isSample: false },
+      ],
+    }));
+  }
+
+  function updateTestCase(index: number, patch: Partial<TestCaseState>) {
+    setForm((prev) => ({
+      ...prev,
+      testCases: prev.testCases.map((tc, i) =>
+        i === index ? { ...tc, ...patch } : tc,
+      ),
+    }));
+  }
+
+  function removeTestCase(index: number) {
+    setForm((prev) => ({
+      ...prev,
+      testCases: prev.testCases.filter((_, i) => i !== index),
+    }));
   }
 
   function updateOption(index: number, patch: Partial<OptionState>) {
@@ -210,6 +302,18 @@ export function QuestionForm({
       options: isChoiceType
         ? form.options.map((o) => ({ text: o.text, isCorrect: o.isCorrect }))
         : form.options.map((o) => ({ text: o.text })),
+      ...(isNumeric ? { numericTolerance: form.numericTolerance } : {}),
+      ...(isCode
+        ? {
+            codeLanguage: form.codeLanguage,
+            starterCode: form.starterCode || undefined,
+            referenceSolution: form.referenceSolution || undefined,
+            ...(form.codeLanguage === "css"
+              ? { previewHtml: form.previewHtml || undefined }
+              : {}),
+            testCases: form.testCases,
+          }
+        : {}),
     };
 
     const parsed = questionInputSchema.safeParse(payload);
@@ -277,15 +381,205 @@ export function QuestionForm({
         <Card>
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">
-              {isChoiceType ? "Answer Options" : "Accepted Answers"}
+              {isEssay
+                ? "Grading"
+                : isCode
+                  ? "Code Configuration"
+                  : isNumeric
+                    ? "Accepted Value"
+                    : isChoiceType
+                      ? "Answer Options"
+                      : "Accepted Answers"}
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {errors.options && (
               <p className="text-destructive text-sm">{errors.options}</p>
             )}
+            {errors.testCases && (
+              <p className="text-destructive text-sm">{errors.testCases}</p>
+            )}
+            {errors.previewHtml && (
+              <p className="text-destructive text-sm">{errors.previewHtml}</p>
+            )}
 
-            {isSingleCorrect ? (
+            {isCode ? (
+              <div className="flex flex-col gap-4">
+                <div>
+                  <Label htmlFor="code-language">Language</Label>
+                  <Select
+                    value={form.codeLanguage}
+                    onValueChange={(v) =>
+                      handleCodeLanguageChange(v as CodeLanguage)
+                    }
+                  >
+                    <SelectTrigger id="code-language" className="mt-1.5 w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CODE_LANGUAGES.map((language) => (
+                        <SelectItem key={language} value={language}>
+                          {language}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Starter Code (optional)</Label>
+                  <div className="mt-1.5">
+                    <CodeEditor
+                      language={form.codeLanguage}
+                      value={form.starterCode}
+                      onChange={(value) =>
+                        setForm((prev) => ({ ...prev, starterCode: value }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Reference Solution (teacher-only, optional)</Label>
+                  <div className="mt-1.5">
+                    <CodeEditor
+                      language={form.codeLanguage}
+                      value={form.referenceSolution}
+                      onChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          referenceSolution: value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                {form.codeLanguage === "css" && (
+                  <div>
+                    <Label>Preview HTML shell</Label>
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      CSS alone has nothing to render — the student&apos;s CSS
+                      previews against this fixed HTML.
+                    </p>
+                    <div className="mt-1.5">
+                      <CodeEditor
+                        language="html"
+                        value={form.previewHtml}
+                        onChange={(value) =>
+                          setForm((prev) => ({ ...prev, previewHtml: value }))
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {isCodeExecutable && (
+                  <div className="flex flex-col gap-3">
+                    <Label>Test Cases</Label>
+                    {form.testCases.map((testCase, index) => (
+                      <div
+                        key={index}
+                        className="border-outline-variant flex flex-col gap-2 rounded-lg border p-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-2 text-sm">
+                            <Checkbox
+                              checked={testCase.isSample}
+                              onCheckedChange={(checked) =>
+                                updateTestCase(index, {
+                                  isSample: checked === true,
+                                })
+                              }
+                            />
+                            Visible to student via &quot;Run&quot;
+                          </label>
+                          {form.testCases.length > 1 && (
+                            <RemoveOptionButton
+                              onClick={() => removeTestCase(index)}
+                            />
+                          )}
+                        </div>
+                        <div>
+                          <Label className="text-xs">Input (stdin)</Label>
+                          <Textarea
+                            className="mt-1 font-mono text-sm"
+                            value={testCase.input}
+                            onChange={(e) =>
+                              updateTestCase(index, { input: e.target.value })
+                            }
+                            placeholder="Left blank if the program reads no input"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Expected Output</Label>
+                          <Textarea
+                            className="mt-1 font-mono text-sm"
+                            value={testCase.expectedOutput}
+                            onChange={(e) =>
+                              updateTestCase(index, {
+                                expectedOutput: e.target.value,
+                              })
+                            }
+                            placeholder="Exact expected stdout"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    {form.testCases.length < 20 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={addTestCase}
+                        className="self-start border-dashed"
+                      >
+                        <Plus className="size-4" />
+                        Add Test Case
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : isEssay ? (
+              <p className="text-muted-foreground text-sm">
+                Essay answers have no single correct answer — a teacher grades
+                each submission by hand from the attempt&apos;s review page.
+                Use Explanation (right) for rubric notes or a model answer.
+              </p>
+            ) : isNumeric ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="numeric-value">Accepted value</Label>
+                  <Input
+                    id="numeric-value"
+                    type="number"
+                    className="mt-1.5"
+                    value={form.options[0]?.text ?? ""}
+                    onChange={(e) =>
+                      updateOption(0, { text: e.target.value })
+                    }
+                    placeholder="e.g. 3.14"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="numeric-tolerance">Tolerance (±)</Label>
+                  <Input
+                    id="numeric-tolerance"
+                    type="number"
+                    min={0}
+                    className="mt-1.5"
+                    value={form.numericTolerance}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        numericTolerance: Number(e.target.value) || 0,
+                      }))
+                    }
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            ) : isSingleCorrect ? (
               <RadioGroup
                 value={String(form.options.findIndex((o) => o.isCorrect))}
                 onValueChange={(value) => setCorrectOption(Number(value))}
@@ -362,17 +656,21 @@ export function QuestionForm({
               ))
             )}
 
-            {form.type !== "true_false" && form.options.length < 10 && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={addOption}
-                className="border-dashed"
-              >
-                <Plus className="size-4" />
-                {isChoiceType ? "Add Option" : "Add Accepted Answer"}
-              </Button>
-            )}
+            {!isEssay &&
+              !isNumeric &&
+              !isCode &&
+              form.type !== "true_false" &&
+              form.options.length < 10 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={addOption}
+                  className="border-dashed"
+                >
+                  <Plus className="size-4" />
+                  {isChoiceType ? "Add Option" : "Add Accepted Answer"}
+                </Button>
+              )}
           </CardContent>
         </Card>
       </div>
@@ -393,9 +691,9 @@ export function QuestionForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(TYPE_LABELS).map(([value, label]) => (
+                  {ALL_QUESTION_TYPES.map((value) => (
                     <SelectItem key={value} value={value}>
-                      {label}
+                      {QUESTION_TYPES[value].label}
                     </SelectItem>
                   ))}
                 </SelectContent>
