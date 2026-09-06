@@ -132,10 +132,18 @@ services:
       # compares this against the browser's Origin header on every socket handshake.
       APP_URL: ${APP_URL:-https://localhost}
       REALTIME_PORT: 4001
+      # The realtime server never executes code (src/backend/execution/ is only ever imported by
+      # the Next app's routes/gradeAttempt) but it does import src/lib/env.ts directly (no
+      # "server-only" guard — see that file's own header), which validates ALL of process.env
+      # eagerly at module load, PISTON_URL included. Without this, the realtime process fails
+      # env validation and crash-loops on boot even though it never reads the value.
+      PISTON_URL: http://piston:2000
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      piston:
         condition: service_healthy
 
   nginx:
