@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-// Only choice-based types fit a fast-tap live round — short_answer/fill_in_blank stay
-// exam-only (see live.service.ts's question-pool filter).
-export const LIVE_QUESTION_TYPES = [
-  "multiple_choice",
-  "true_false",
-  "multiple_answer",
-] as const;
+import { LIVE_QUESTION_TYPES } from "@/backend/questions/question-types";
+
+// Only choice-based types fit a fast-tap live round — short_answer/fill_in_blank/essay/
+// numeric_answer/code_answer all stay exam-only (see live.service.ts's question-pool filter).
+// Re-exported under this name so live.service.ts's import doesn't need to change — the registry
+// (backend/questions/question-types.ts) is the source of truth for which types those are.
+export { LIVE_QUESTION_TYPES };
 
 // A closed, cosmetic set of roster/leaderboard avatars — lucide-react has no dedicated
 // lion/tiger glyph in this version (same gap option-styles.ts already worked around), so this

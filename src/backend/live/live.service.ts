@@ -21,6 +21,7 @@ import {
   type LiveSessionParticipant,
 } from "@/database/schema";
 import { computeSpeedPoints } from "@/backend/live/live-scoring";
+import { QUESTION_TYPES } from "@/backend/questions/question-types";
 import {
   LIVE_AVATARS,
   LIVE_QUESTION_TYPES,
@@ -145,9 +146,12 @@ export async function createLiveSession(
     )
     .orderBy(quizQuestions.position);
   if (pool.length === 0) {
-    throw conflict(
-      "This quiz has no multiple-choice, true/false, or multiple-answer questions to host live",
-    );
+    const names = LIVE_QUESTION_TYPES.map((t) => QUESTION_TYPES[t].label);
+    const labels =
+      names.length > 1
+        ? `${names.slice(0, -1).join(", ")}, or ${names.at(-1)}`
+        : (names[0] ?? "");
+    throw conflict(`This quiz has no ${labels} questions to host live`);
   }
 
   const questionCount = Math.min(quiz.questionsPerAttempt, pool.length);

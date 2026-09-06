@@ -41,6 +41,37 @@ services:
       timeout: 5s
       retries: 10
 
+  # Self-hosted sandboxed code runner for code_answer questions (Phase 16). Deliberately no
+  # `ports:` — reachable only as `piston:2000` on this compose network, the same way
+  # postgres/redis above already aren't host-exposed in prod; `infrastructure/nginx/nginx.conf`
+  # has no location block for it and must never gain one. `privileged: true` is Piston's own
+  # documented requirement for its sandboxing. Run `pnpm piston:install` against it (see
+  # docker-compose.yml's own comment) before `app` can execute anything.
+  piston:
+    image: ghcr.io/engineer-man/piston
+    restart: unless-stopped
+    privileged: true
+    environment:
+      # See docker-compose.yml's matching comment — Piston's default run_timeout ceiling
+      # (3000ms) is below GRADE_TIMEOUT_MS (8000ms) and gets rejected with a 400, not clamped.
+      PISTON_RUN_TIMEOUT: "10000"
+    volumes:
+      - quizguard_prod_piston_packages:/piston/packages
+    tmpfs:
+      - /tmp:exec
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:2000/api/v2/runtimes',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   migrate:
     build:
       context: .
@@ -79,10 +110,13 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      PISTON_URL: http://piston:2000
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      piston:
         condition: service_healthy
 
   realtime:
@@ -120,3 +154,4 @@ services:
 volumes:
   quizguard_prod_postgres_data:
   quizguard_prod_redis_data:
+  quizguard_prod_piston_packages:

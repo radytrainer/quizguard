@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   ClipboardList,
   LayoutDashboard,
   Radio,
@@ -37,6 +38,7 @@ const navItems = [
     statusKey: "liveActive" as const,
   },
   { href: "/teacher/questions", label: "Question Bank", icon: Wallet },
+  { href: "/teacher/grading", label: "Grading", icon: ClipboardCheck },
   { href: "/teacher/classes", label: "Classes", icon: Users },
   { href: "/teacher/import", label: "Import", icon: Upload },
 ];

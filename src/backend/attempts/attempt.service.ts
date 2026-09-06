@@ -15,6 +15,7 @@ import {
   examAttemptQuestions,
   examAttempts,
   questionOptions,
+  questionTestCases,
   questions,
   quizQuestions,
   quizzes,
@@ -22,11 +23,19 @@ import {
   type ExamAttempt,
   type Quiz,
 } from "@/database/schema";
+import type { CodeLanguage } from "@/backend/questions/question-types";
+import type { TestCaseResult } from "@/backend/execution/execution.service";
 
 export interface AttemptQuestionOption {
   id: string;
   text: string;
   isCorrect?: boolean;
+}
+
+export interface AttemptCodeSampleTestCase {
+  id: string;
+  input: string;
+  expectedOutput: string;
 }
 
 export interface AttemptQuestionView {
@@ -35,9 +44,29 @@ export interface AttemptQuestionView {
   text: string;
   points: number;
   options: AttemptQuestionOption[];
+  // code_answer only. Deliberately carries only starterCode/previewHtml/sample test cases —
+  // never referenceSolution, and never a non-sample test case's input/expectedOutput. This is
+  // the student-facing view.
+  code: {
+    language: CodeLanguage;
+    starterCode: string | null;
+    previewHtml: string | null;
+    sampleTestCases: AttemptCodeSampleTestCase[];
+  } | null;
   answer: {
     selectedOptionIds: string[] | null;
     textAnswer: string | null;
+    // Only meaningful once reviewAvailable — gated the same way options[].isCorrect already
+    // is, so a not-yet-released review never leaks a manual grade or feedback either.
+    isCorrect: boolean | null;
+    pointsAwarded: number | null;
+    needsReview: boolean;
+    teacherFeedback: string | null;
+    // code_answer python/javascript only — a snapshot of each test case's pass/fail + the
+    // student's own stdout/stderr. Never carries a test case's input/expectedOutput (see
+    // execution.service.ts's TestCaseResult shape), so a hidden test case's content still never
+    // leaks here even once review is available.
+    testResults: TestCaseResult[] | null;
   } | null;
 }
 
@@ -52,6 +81,10 @@ export interface AttemptView {
   score: number | null;
   maxScore: number | null;
   passed: boolean | null;
+  // True while any question (essay always; code_answer html/css in Phase 16) is still awaiting
+  // a teacher's grade — score/maxScore/passed above already count those as 0 provisionally, so
+  // the UI can label them "provisional" rather than implying the exam is fully graded.
+  hasPendingReview: boolean;
   reviewAvailable: boolean;
   fullscreenRequired: boolean;
   monitorActivity: boolean;
@@ -321,6 +354,9 @@ async function loadQuestionViews(
       type: questions.type,
       text: questions.text,
       points: questions.points,
+      codeLanguage: questions.codeLanguage,
+      starterCode: questions.starterCode,
+      previewHtml: questions.previewHtml,
     })
     .from(examAttemptQuestions)
     .innerJoin(questions, eq(questions.id, examAttemptQuestions.questionId))
@@ -340,6 +376,43 @@ async function loadQuestionViews(
     const list = optionsByQuestion.get(option.questionId) ?? [];
     list.push(option);
     optionsByQuestion.set(option.questionId, list);
+  }
+
+  // Sample-only, and only id/input/expectedOutput — a hidden test case's content, and every
+  // question's referenceSolution, must never reach this student-facing view.
+  const codeQuestionIds = snapshot
+    .filter((row) => row.type === "code_answer")
+    .map((row) => row.questionId);
+  const sampleTestCaseRows =
+    codeQuestionIds.length > 0
+      ? await db
+          .select({
+            id: questionTestCases.id,
+            questionId: questionTestCases.questionId,
+            input: questionTestCases.input,
+            expectedOutput: questionTestCases.expectedOutput,
+          })
+          .from(questionTestCases)
+          .where(
+            and(
+              inArray(questionTestCases.questionId, codeQuestionIds),
+              eq(questionTestCases.isSample, true),
+            ),
+          )
+          .orderBy(questionTestCases.position)
+      : [];
+  const sampleTestCasesByQuestion = new Map<
+    string,
+    AttemptCodeSampleTestCase[]
+  >();
+  for (const testCase of sampleTestCaseRows) {
+    const list = sampleTestCasesByQuestion.get(testCase.questionId) ?? [];
+    list.push({
+      id: testCase.id,
+      input: testCase.input,
+      expectedOutput: testCase.expectedOutput,
+    });
+    sampleTestCasesByQuestion.set(testCase.questionId, list);
   }
 
   const answerRows = await db
@@ -367,10 +440,29 @@ async function loadQuestionViews(
         text: o.text,
         ...(reviewAvailable ? { isCorrect: o.isCorrect } : {}),
       })),
+      code:
+        row.type === "code_answer" && row.codeLanguage
+          ? {
+              language: row.codeLanguage,
+              starterCode: row.starterCode,
+              previewHtml: row.previewHtml,
+              sampleTestCases: sampleTestCasesByQuestion.get(row.questionId) ?? [],
+            }
+          : null,
       answer: answer
         ? {
             selectedOptionIds: answer.selectedOptionIds,
             textAnswer: answer.textAnswer,
+            isCorrect: reviewAvailable ? answer.isCorrect : null,
+            pointsAwarded: reviewAvailable ? answer.pointsAwarded : null,
+            needsReview: reviewAvailable && answer.needsReview,
+            teacherFeedback: reviewAvailable ? answer.teacherFeedback : null,
+            // exam_answers.test_results is a jsonb column (typed `unknown` by Drizzle) — cast
+            // here since we're the only writer (answer.service.ts#gradeAttempt) and know its
+            // real shape is always this or null, never anything else.
+            testResults: reviewAvailable
+              ? (answer.testResults as TestCaseResult[] | null)
+              : null,
           }
         : null,
     };
@@ -406,6 +498,16 @@ export async function getAttempt(
       ? await loadQuestionViews(attemptId, reviewAvailable)
       : [];
 
+  // Always computed, unlike the per-question breakdown above — this only says "some question's
+  // grade may still change," never what that question was or how it's currently scored, so it
+  // doesn't need to wait on reviewAvailable the way the detailed fields do.
+  const [{ pendingCount }] = await db
+    .select({ pendingCount: count() })
+    .from(examAnswers)
+    .where(
+      and(eq(examAnswers.attemptId, attemptId), eq(examAnswers.needsReview, true)),
+    );
+
   return {
     id: attempt.id,
     quizId: attempt.quizId,
@@ -417,6 +519,7 @@ export async function getAttempt(
     score: attempt.score,
     maxScore: attempt.maxScore,
     passed: attempt.passed,
+    hasPendingReview: pendingCount > 0,
     reviewAvailable,
     fullscreenRequired: quiz.fullscreenRequired,
     monitorActivity: quiz.monitorActivity,

@@ -169,7 +169,7 @@ describe("parseImportRow — multiple choice", () => {
 
   it("flags an invalid question type", () => {
     const result = parseImportRow(
-      row({ type: "essay" }),
+      row({ type: "matching" }),
       mcMapping,
       2,
       new Set(),

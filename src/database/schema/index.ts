@@ -5,6 +5,7 @@ export * from "./classes";
 export * from "./class-students";
 export * from "./questions";
 export * from "./question-options";
+export * from "./question-test-cases";
 export * from "./quizzes";
 export * from "./quiz-questions";
 export * from "./quiz-assignments";

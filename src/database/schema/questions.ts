@@ -1,4 +1,5 @@
 import {
+  doublePrecision,
   index,
   integer,
   pgEnum,
@@ -16,12 +17,25 @@ export const questionTypeEnum = pgEnum("question_type", [
   "multiple_answer",
   "short_answer",
   "fill_in_blank",
+  "essay",
+  "numeric_answer",
+  "code_answer",
 ]);
 
 export const questionDifficultyEnum = pgEnum("question_difficulty", [
   "easy",
   "medium",
   "hard",
+]);
+
+// code_answer only — which language the student's editor/execution targets. Values kept in
+// sync with backend/questions/question-types.ts's own CODE_LANGUAGES list (that one isn't a DB
+// enum, so it can't just re-export this one; see that file for why).
+export const codeLanguageEnum = pgEnum("code_language", [
+  "html",
+  "css",
+  "python",
+  "javascript",
 ]);
 
 export const questions = pgTable(
@@ -40,6 +54,20 @@ export const questions = pgTable(
     text: text("text").notNull(),
     explanation: text("explanation"),
     tags: text("tags").array().notNull().default([]),
+    // numeric_answer only — the accepted value itself still lives in question_options (same
+    // "one accepted value per row" convention as short_answer/fill_in_blank), this is just the
+    // ± tolerance around it.
+    numericTolerance: doublePrecision("numeric_tolerance"),
+    // code_answer only (Phase 15 schema, Phase 16 application code — see
+    // docs/ARCHITECTURE.md's phase list) — added now so the later phase needs no migration of
+    // its own. All nullable; every other question type leaves them null.
+    codeLanguage: codeLanguageEnum("code_language"),
+    starterCode: text("starter_code"),
+    // Fixed HTML shell a `codeLanguage: "css"` question's student-written CSS previews
+    // against — CSS alone has nothing to render into.
+    previewHtml: text("preview_html"),
+    // Teacher-only model answer — never selected into any student-facing query.
+    referenceSolution: text("reference_solution"),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),

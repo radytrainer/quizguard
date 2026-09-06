@@ -70,6 +70,7 @@ interface LiveEvent {
   type:
     | "attempt_started"
     | "attempt_submitted"
+    | "attempt_regraded"
     | "violation"
     | "attempt_locked"
     | "attempt_unlocked";
@@ -92,10 +93,12 @@ function eventVerb(event: LiveEvent): string {
   if (event.type === "attempt_started") return "started the quiz";
   if (event.type === "attempt_locked") return "exam locked";
   if (event.type === "attempt_unlocked") return "was unlocked";
-  if (event.type === "attempt_submitted") {
+  if (event.type === "attempt_submitted" || event.type === "attempt_regraded") {
     const outcome =
       event.passed === null ? "" : event.passed ? " — passed" : " — not passed";
-    return `submitted${outcome}`;
+    return event.type === "attempt_regraded"
+      ? `regraded${outcome}`
+      : `submitted${outcome}`;
   }
   const labels: Record<string, string> = {
     fullscreen_exit: "exited fullscreen",
@@ -116,7 +119,7 @@ function eventBadgeClassName(event: LiveEvent): string {
   if (event.type === "attempt_started") return STARTED_BADGE_CLASSNAME;
   if (event.type === "attempt_unlocked") return STARTED_BADGE_CLASSNAME;
   if (event.type === "attempt_locked") return LOCKED_BADGE_CLASSNAME;
-  if (event.type === "attempt_submitted")
+  if (event.type === "attempt_submitted" || event.type === "attempt_regraded")
     return outcomeBadgeClassName(event.passed ?? null);
   if (event.locked) return LOCKED_BADGE_CLASSNAME;
   return (
@@ -259,6 +262,20 @@ export function LiveMonitor({
             maxScore: event.maxScore ?? next[index].maxScore,
             passed: event.passed ?? next[index].passed,
             submittedAt: new Date(event.occurredAt),
+          };
+          return next;
+        }
+
+        // A teacher graded an essay/manually-reviewed answer — same score fields as
+        // attempt_submitted, but status/submittedAt don't change (the attempt was already done).
+        if (event.type === "attempt_regraded") {
+          if (index === -1) return prev;
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            score: event.score ?? next[index].score,
+            maxScore: event.maxScore ?? next[index].maxScore,
+            passed: event.passed ?? next[index].passed,
           };
           return next;
         }

@@ -41,6 +41,46 @@ services:
       timeout: 5s
       retries: 10
 
+  # Self-hosted sandboxed code runner for code_answer questions (Phase 16) — never exposed to
+  # the browser, only ever called server-side from src/backend/execution/. `privileged: true` is
+  # Piston's own documented requirement for its sandboxing (isolate/nsjail + cgroups); published
+  # here (dev only — docker-compose.prod.yml deliberately does not) purely for convenience
+  # curling it directly while developing. Once healthy, install the python/node runtimes with
+  # `pnpm piston:install` (scripts/piston-install-packages.ts) before the app can actually
+  # execute anything — packages persist across restarts via the named volume below.
+  piston:
+    image: ghcr.io/engineer-man/piston
+    container_name: quizguard-piston
+    restart: unless-stopped
+    privileged: true
+    environment:
+      # Piston's own default run_timeout ceiling is 3000ms — below what
+      # src/backend/execution/execution.service.ts requests for grading (GRADE_TIMEOUT_MS,
+      # 8000ms), which the server rejects outright with a 400 rather than clamping. Raised here
+      # with headroom above the app's own highest requested run_timeout.
+      PISTON_RUN_TIMEOUT: "10000"
+    ports:
+      - "${PISTON_PORT:-2000}:2000"
+    volumes:
+      - quizguard_piston_packages:/piston/packages
+    tmpfs:
+      - /tmp:exec
+    healthcheck:
+      # No curl/wget in this image — it's Node-based, so the healthcheck uses Node's own http
+      # module instead (same reasoning as postgres/redis using their own native CLI tools above).
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:2000/api/v2/runtimes',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 volumes:
   quizguard_postgres_data:
   quizguard_redis_data:
+  quizguard_piston_packages:

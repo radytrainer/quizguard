@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -28,10 +35,29 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
 import { getRealtimeSocket } from "@/features/realtime/socket-client";
+import {
+  QUESTION_TYPES,
+  type CodeLanguage,
+} from "@/backend/questions/question-types";
+import type { QuestionType } from "@/database/schema";
+import { CodeEditor } from "@/features/code/code-editor";
+import {
+  buildCodePreviewSrcDoc,
+  SandboxedPreview,
+} from "@/features/code/sandboxed-preview";
+import {
+  TestResultsTable,
+  type TestCaseResult,
+} from "@/features/code/test-results-table";
 import { cn } from "@/lib/utils";
 
-const CHOICE_TYPES = new Set(["multiple_choice", "true_false"]);
+function typeMeta(type: string) {
+  return QUESTION_TYPES[type as QuestionType] as
+    | (typeof QUESTION_TYPES)[QuestionType]
+    | undefined;
+}
 
 interface AttemptQuestionOption {
   id: string;
@@ -45,9 +71,21 @@ interface AttemptQuestionView {
   text: string;
   points: number;
   options: AttemptQuestionOption[];
+  code: {
+    language: CodeLanguage;
+    starterCode: string | null;
+    previewHtml: string | null;
+    sampleTestCases: { id: string; input: string; expectedOutput: string }[];
+  } | null;
   answer: {
     selectedOptionIds: string[] | null;
     textAnswer: string | null;
+    // Only ever populated once reviewAvailable — see attempt.service.ts's own gating.
+    isCorrect: boolean | null;
+    pointsAwarded: number | null;
+    needsReview: boolean;
+    teacherFeedback: string | null;
+    testResults: TestCaseResult[] | null;
   } | null;
 }
 
@@ -62,6 +100,7 @@ export interface AttemptData {
   score: number | null;
   maxScore: number | null;
   passed: boolean | null;
+  hasPendingReview: boolean;
   reviewAvailable: boolean;
   fullscreenRequired: boolean;
   monitorActivity: boolean;
@@ -151,6 +190,13 @@ export function ExamAttempt({
   const [violationCount, setViolationCount] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
   const { flagged, toggle: toggleFlag } = useFlaggedQuestions(attempt.id);
+  // "Run" output — deliberately kept out of `answers`: it's ephemeral scratch state, never
+  // persisted, never part of the saved answer, just feedback while the student is working.
+  const [running, setRunning] = useState<Record<string, boolean>>({});
+  const [runResults, setRunResults] = useState<
+    Record<string, TestCaseResult[]>
+  >({});
+  const [runErrors, setRunErrors] = useState<Record<string, string>>({});
   const autoSubmitted = useRef(false);
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const wasFullscreen = useRef(false);
@@ -392,6 +438,39 @@ export function ExamAttempt({
     }, 600);
   }
 
+  async function handleRun(questionId: string, code: string) {
+    setRunning((prev) => ({ ...prev, [questionId]: true }));
+    setRunErrors((prev) => ({ ...prev, [questionId]: "" }));
+    try {
+      const res = await fetch(`/api/attempts/${attempt.id}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionId, code }),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        results?: TestCaseResult[];
+        error?: { message?: string } | string;
+      } | null;
+      if (!res.ok || !body || body.ok === false) {
+        const message =
+          typeof body?.error === "string"
+            ? body.error
+            : (body?.error?.message ?? "Couldn't run your code. Try again.");
+        setRunErrors((prev) => ({ ...prev, [questionId]: message }));
+        return;
+      }
+      setRunResults((prev) => ({ ...prev, [questionId]: body.results ?? [] }));
+    } catch {
+      setRunErrors((prev) => ({
+        ...prev,
+        [questionId]: "Couldn't run your code. Try again.",
+      }));
+    } finally {
+      setRunning((prev) => ({ ...prev, [questionId]: false }));
+    }
+  }
+
   const isAnswered = useCallback(
     (questionId: string): boolean => {
       const local = answers[questionId];
@@ -416,14 +495,26 @@ export function ExamAttempt({
   const local = currentQuestion
     ? answers[currentQuestion.questionId]
     : undefined;
-  const isChoice = currentQuestion
-    ? CHOICE_TYPES.has(currentQuestion.type)
+  const currentMeta = currentQuestion ? typeMeta(currentQuestion.type) : undefined;
+  // isChoice here means "single-correct, radio-rendered" specifically — multiple_answer (also
+  // choice-based in the registry) gets its own isMulti/checkbox branch below.
+  const isChoice = currentMeta ? currentMeta.isChoice && !currentMeta.isMultiSelect : false;
+  const isMulti = currentMeta?.isMultiSelect ?? false;
+  const isEssay = currentQuestion?.type === "essay";
+  const isNumeric = currentQuestion?.type === "numeric_answer";
+  const isCode = currentQuestion?.type === "code_answer";
+  const isPlainText = currentMeta
+    ? !currentMeta.isChoice && !isEssay && !isNumeric && !isCode
     : false;
-  const isMulti = currentQuestion?.type === "multiple_answer";
-  const isText = currentQuestion ? !isChoice && !isMulti : false;
   const selectedIds =
     local && "selectedOptionIds" in local ? local.selectedOptionIds : [];
   const textValue = local && "textAnswer" in local ? local.textAnswer : "";
+  // Falls back to starterCode only for display/run purposes when nothing's been typed yet —
+  // never written into `answers` until the student actually changes it.
+  const codeValue =
+    isCode && currentQuestion?.code
+      ? textValue || currentQuestion.code.starterCode || ""
+      : "";
 
   const mapEntries = useMemo(
     () =>
@@ -522,6 +613,11 @@ export function ExamAttempt({
           <span className="font-semibold">
             {attempt.score} / {attempt.maxScore}
           </span>
+          {attempt.hasPendingReview && (
+            <span className="text-warning ml-2 font-normal">
+              (provisional — some answers are still awaiting teacher review)
+            </span>
+          )}
         </p>
       )}
 
@@ -721,7 +817,23 @@ export function ExamAttempt({
                       })}
                     </div>
                   )}
-                  {isText && (
+                  {isCode && currentQuestion.code && (
+                    <CodeAnswerEditor
+                      code={currentQuestion.code}
+                      value={codeValue}
+                      disabled={!inProgress}
+                      running={Boolean(running[currentQuestion.questionId])}
+                      runError={runErrors[currentQuestion.questionId]}
+                      runResults={runResults[currentQuestion.questionId]}
+                      onChange={(value) =>
+                        handleTextChange(currentQuestion.questionId, value)
+                      }
+                      onRun={() =>
+                        void handleRun(currentQuestion.questionId, codeValue)
+                      }
+                    />
+                  )}
+                  {isPlainText && (
                     <Input
                       value={textValue}
                       disabled={!inProgress}
@@ -734,6 +846,71 @@ export function ExamAttempt({
                       placeholder="Type your answer..."
                     />
                   )}
+                  {isNumeric && (
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      value={textValue}
+                      disabled={!inProgress}
+                      onChange={(e) =>
+                        handleTextChange(
+                          currentQuestion.questionId,
+                          e.target.value,
+                        )
+                      }
+                      placeholder="Enter a number..."
+                    />
+                  )}
+                  {isEssay && (
+                    <Textarea
+                      value={textValue}
+                      disabled={!inProgress}
+                      onChange={(e) =>
+                        handleTextChange(
+                          currentQuestion.questionId,
+                          e.target.value,
+                        )
+                      }
+                      placeholder="Write your answer..."
+                      className="min-h-40"
+                    />
+                  )}
+                  {!inProgress &&
+                    attempt.reviewAvailable &&
+                    currentQuestion.answer &&
+                    (isEssay || isNumeric || isCode) && (
+                      <div className="mt-3 flex flex-col gap-2 text-sm">
+                        {currentQuestion.answer.needsReview ? (
+                          <Badge
+                            variant="outline"
+                            className="border-warning/30 bg-warning/10 text-warning w-fit"
+                          >
+                            Pending teacher review
+                          </Badge>
+                        ) : (
+                          <p className="text-muted-foreground">
+                            Scored{" "}
+                            <span className="text-foreground font-medium">
+                              {currentQuestion.answer.pointsAwarded ?? 0} /{" "}
+                              {currentQuestion.points}
+                            </span>
+                          </p>
+                        )}
+                        {currentQuestion.answer.testResults && (
+                          <TestResultsTable
+                            results={currentQuestion.answer.testResults}
+                          />
+                        )}
+                        {currentQuestion.answer.teacherFeedback && (
+                          <p className="border-outline-variant rounded-lg border p-3">
+                            <span className="text-muted-foreground">
+                              Feedback:{" "}
+                            </span>
+                            {currentQuestion.answer.teacherFeedback}
+                          </p>
+                        )}
+                      </div>
+                    )}
                 </CardContent>
               </Card>
 
@@ -840,6 +1017,80 @@ export function ExamAttempt({
             </div>
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+/** code_answer's answer widget — a CodeEditor bound to the same textAnswer/handleTextChange
+ * autosave path every other text-like type already uses, plus either a "Run" button (python/
+ * javascript, against sample test cases only) or a live sandboxed preview (html/css, purely
+ * client-side — there's nothing to execute, so no server round trip at all). */
+function CodeAnswerEditor({
+  code,
+  value,
+  disabled,
+  running,
+  runError,
+  runResults,
+  onChange,
+  onRun,
+}: {
+  code: {
+    language: CodeLanguage;
+    starterCode: string | null;
+    previewHtml: string | null;
+    sampleTestCases: { id: string; input: string; expectedOutput: string }[];
+  };
+  value: string;
+  disabled: boolean;
+  running: boolean;
+  runError?: string;
+  runResults?: TestCaseResult[];
+  onChange: (value: string) => void;
+  onRun: () => void;
+}) {
+  // Deferred, not the raw value — the iframe re-renders on every keystroke otherwise, which
+  // thrashes far more than a text field would (a full document reload each time).
+  const deferredValue = useDeferredValue(value);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <CodeEditor
+        language={code.language}
+        value={value}
+        onChange={onChange}
+        readOnly={disabled}
+        minHeight="220px"
+      />
+      {code.language === "html" || code.language === "css" ? (
+        <div>
+          <p className="text-muted-foreground mb-2 text-xs">Live preview</p>
+          <SandboxedPreview
+            srcDoc={buildCodePreviewSrcDoc(
+              code.language,
+              deferredValue,
+              code.previewHtml,
+            )}
+          />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {!disabled && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRun}
+              disabled={running}
+              className="self-start"
+            >
+              {running ? "Running…" : "Run"}
+            </Button>
+          )}
+          {runError && <p className="text-destructive text-sm">{runError}</p>}
+          {runResults && <TestResultsTable results={runResults} />}
+        </div>
       )}
     </div>
   );
