@@ -16,14 +16,16 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 # NEXT_PUBLIC_* vars are inlined into the client bundle at build time, not read at runtime — so
 # this has to be a build ARG, not a docker-compose `environment:` entry on the runner stage.
-# DATABASE_URL/REDIS_URL are also required here (not just at runtime): src/lib/env.ts validates
-# process.env eagerly at module load, and Next's build evaluates route modules while collecting
-# page data even though every route is dynamic (Section 15) — dummy well-formed values are fine
-# since nothing actually connects during the build, only `env.ts`'s Zod shape check needs to pass.
+# DATABASE_URL/REDIS_URL/PISTON_URL are also required here (not just at runtime): src/lib/env.ts
+# validates process.env eagerly at module load, and Next's build evaluates route modules while
+# collecting page data even though every route is dynamic (Section 15) — dummy well-formed
+# values are fine since nothing actually connects during the build, only `env.ts`'s Zod shape
+# check needs to pass.
 ARG NEXT_PUBLIC_REALTIME_URL
 ENV NEXT_PUBLIC_REALTIME_URL=${NEXT_PUBLIC_REALTIME_URL}
 ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
 ENV REDIS_URL=redis://localhost:6379
+ENV PISTON_URL=http://build:2000
 RUN pnpm build
 
 FROM base AS runner
