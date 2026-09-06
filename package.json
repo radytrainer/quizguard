@@ -88,5 +88,10 @@
     "typescript": "^5",
     "vitest": "^4.1.10"
   },
-  "packageManager": "pnpm@11.20.0"
+  "packageManager": "pnpm@11.20.0",
+  "overrides": {
+    "@types/ioredis-mock": {
+      "ioredis": "^6.0.0"
+    }
+  }
 }
